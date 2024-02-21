@@ -19,7 +19,7 @@ LLVM 13
 git submodule update --init --recursive
 ```
 
-# Install dependencies
+## Install dependencies
 TODO: Please notify me
 
 ## Build SVF
