@@ -2,7 +2,7 @@
 
 <img align="right" width="170" height="220" src="EnclaveFuzzTitle.png">
 
-This repo is the public code for paper [EnclaveFuzz](EnclaveFuzz.pdf) ([slide](EnclaveFuzzSlide.pdf)) in [NDSS 2024](https://www.ndss-symposium.org/ndss2024/)
+This repo is the public code for paper [EnclaveFuzz](EnclaveFuzz.pdf) ([Slide](EnclaveFuzzSlide.pdf), [Poster_CN](EnclaveFuzzPoster.pdf)) in [NDSS 2024](https://www.ndss-symposium.org/ndss2024/)
 
 ```
 @inproceedings{EnclaveFuzz,
