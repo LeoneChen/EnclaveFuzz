@@ -1,17 +1,36 @@
 #include "AddressSanitizer.h"
 #include "FuncRenamePass.h"
-#include "SensitiveLeakSanitizer.h"
+#include "PassUtil.h"
 #include "nlohmann/json.hpp"
+#include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
+#include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/Analysis/MemoryLocation.h"
+#include "llvm/Demangle/Demangle.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/MDBuilder.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
+#include "llvm/Transforms/Utils/PromoteMemToReg.h"
+#include <boost/algorithm/string.hpp>
 #include <filesystem>
+#include <fstream>
+#include <regex>
+#include <sys/time.h>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 using ordered_json = nlohmann::ordered_json;
 using namespace llvm;
-
-static cl::opt<bool>
-    ClEnableSLSan("enable-slsan",
-                  cl::desc("Whether enable Sensitive Leak Santizer or not"),
-                  cl::Hidden, cl::init(false));
 
 static cl::opt<bool> ClDumpStructType("dump-struct", cl::desc("Dump Struct"),
                                       cl::Hidden, cl::init(false));
@@ -22,9 +41,6 @@ struct SGXSanLegacyPass : public ModulePass {
   SGXSanLegacyPass() : ModulePass(ID) {}
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
-    if (ClEnableSLSan) {
-      AU.addRequired<CFLSteensAAWrapperPass>();
-    }
     AU.addRequired<TargetLibraryInfoWrapperPass>();
   }
 
@@ -105,14 +121,6 @@ struct SGXSanLegacyPass : public ModulePass {
     DumpModuleStructs(M);
     Changed |= RenameFuncSym(M);
     Changed |= DefaultRenameFunc(M);
-
-    // run SLSan Pass
-    if (ClEnableSLSan) {
-      dbgs() << "== SLSan Pass: " << M.getName().str() << " ==\n";
-      SensitiveLeakSanitizer SLSan(M);
-      Changed |= SLSan.runOnModule(
-          M, getAnalysis<CFLSteensAAWrapperPass>().getResult());
-    }
 
     // run SGXSan Pass
     dbgs() << "== SGXSan Pass: " << M.getName().str() << " ==\n";

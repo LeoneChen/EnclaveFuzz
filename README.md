@@ -14,29 +14,22 @@ This repo is the public code for paper [EnclaveFuzz](docs/EnclaveFuzz.pdf) ([Sli
 ```
 
 # Branch
-Fuzzer2.0 - Use fuzzing optimized SGX SDK for fuzz
+master - Use fuzzing optimized SGX SDK for fuzz (Fuzzer2.0 is a deprecated branch)
 
 Fuzzer1.0 - Use original SGX SDK for fuzz (support hardware mode and simulation mode)
 
 # Platform
-Ubuntu 20.04
-
-LLVM 13
+- Ubuntu 20.04
+- LLVM 13
 
 # How to use
-## Get all submodule
+See [Dockerfile](Dockerfile/EnclaveFuzz.Dockerfile) for detailed instructions
+
+## Build EnclaveFuzz and get optimized SGX SDK
 ```bash
 git submodule update --init --recursive
-```
-
-## Install dependencies
-TODO: Please notify me
-
-## Build SVF
-SensitiveLeakSan depends on SVF
-```shell
-export LLVM_DIR=/usr/lib/llvm-13 # If you already installed llvm-13 like 'sudo apt install clang-13 llvm-13 lld-13'
-./build_svf.sh
+./build.sh -g --cov --prepare-sdk --build-sdk # here we debug build, with libfuzzer as fuzz engine, with SGXSDK instrumented
+# ./clean.sh # clean EnclaveFuzz and optimized SGX SDK
 ```
 
 ## Prepare kAFL (Optional)
@@ -47,26 +40,6 @@ make deploy
 cd ..
 ```
 
-## Prepare complete source code of linux-sgx
-```shell
-./BeforeGetSDK.sh
-```
-or install the original SGX SDK, it will prepare the complete source code of linux-sgx and install the original SGX SDK at /opt/intel/
-```shell
-cd ThirdParty/linux-sgx-build-scripts
-./prepare.sh
-./build_install.sh [DEBUG=1] # [DEBUG=1] means DEBUG=1 is optional argument passed to script
-# ./uninstall.sh # Uninstall SGXSDK
-# ./unprepare.sh # Clean the environment of your machine and clean linux-sgx repo
-cd ../..
-```
-
-## Build EnclaveFuzz and get optimized SGX SDK
-```shell
-./build.sh [MODE=RELEASE|DEBUG] [FUZZER=LIBFUZZER|KAFL] # Default MODE is RELEASE, default FUZZER is LIBFUZZER (first choice is the default)
-./GetSDK.sh [MODE=RELEASE|DEBUG] [FUZZER=LIBFUZZER|KAFL] [SILENT=TRUE|FALSE] [SDK_VER=2_19|2_14] [INST_COV=TRUE|FALSE] # INST_COV means instrument coverage collection code at SGX SDK
-# ./clean.sh # clean EnclaveFuzz and optimized SGX SDK
-```
 ## Get prepared SGX applications
 We have prepared all modified SGX applications which we can directly fuzz.
 ```shell
@@ -97,8 +70,8 @@ Some repos are built with Autotool, like [BiORAM-SGX](https://github.com/LeoneCh
 cd ~/EnclaveFuzz/SGX_APP/sgx-wallet # I put EnclaveFuzz repo at home path (~) , and put SGX_APP at EnclaveFuzz
 git checkout Fuzzer2.0
 ./build.sh MODE=DEBUG
-~/EnclaveFuzz/Tool/setup.sh sgx-wallet enclave.so /data/leone/SGX-WALLET/Fuzzer2 TASKSET="taskset -c 127"
-cd /data/leone/SGX-WALLET/Fuzzer2
+~/EnclaveFuzz/Tool/workdir/setup.sh --app sgx-wallet --enclave enclave.so --workdir ~/EnclaveFuzzData/SGX-WALLET/Fuzzer2 --taskset 127
+cd ~/EnclaveFuzzData/SGX-WALLET/Fuzzer2-*
 ./fuzz.sh # default run 86400 second
 # ./stop.sh # stop before fuzzing finish
 # ./merge.sh # merge profraw from Source Based Coverage when fuzzing

@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "*.in": "cpp",
+        "iomanip": "cpp"
+    },
+    "C_Cpp.clang_format_fallbackStyle": "LLVM"
+}
