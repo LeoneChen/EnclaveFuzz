@@ -70,13 +70,26 @@ Some repos are built with Autotool, like [BiORAM-SGX](https://github.com/LeoneCh
 cd ~/EnclaveFuzz/SGX_APP/sgx-wallet # I put EnclaveFuzz repo at home path (~) , and put SGX_APP at EnclaveFuzz
 git checkout Fuzzer2.0
 ./build.sh MODE=DEBUG
-~/EnclaveFuzz/Tool/workdir/setup.sh --app sgx-wallet --enclave enclave.so --workdir ~/EnclaveFuzzData/SGX-WALLET/Fuzzer2 --taskset 127
+~/EnclaveFuzz/Tool/workdir/setup.sh --app sgx-wallet --enclave enclave.so --workdir ~/EnclaveFuzzData/SGX-WALLET/Fuzzer2 --taskset 1
 cd ~/EnclaveFuzzData/SGX-WALLET/Fuzzer2-*
 ./fuzz.sh # default run 86400 second
 # ./stop.sh # stop before fuzzing finish
 # ./merge.sh # merge profraw from Source Based Coverage when fuzzing
 # ./show_cov.sh # show result from Source Based Coverage
 # coverage_exp.log # it is log from libfuzzer
+```
+
+After fuzzing, we can filter crash inputs.
+
+NOTICE: `extra-opt` should be same as flags in `~/EnclaveFuzzData/SGX-WALLET/Fuzzer2-*/fuzz.sh` to re-produce, e.g. flags in `fuzz.sh` is `--cb_enclave=TestEnclave -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 -timeout=60 -max_total_time=86400 -fork=1`. 
+- `--cb_enclave=TestEnclave` is necessary to tell TestApp where TestEnclave is, but `cb_enclave` default value is TestEnclave, so here we can omit it.
+- These flags is not necessary to reproduce: `-print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -timeout=60 -max_total_time=86400 -fork=1`.
+- `-max_len=10000000` is necessary to reproduce, so we need add it in `extra-opt`.
+- Other necessary flags can be found in [libFuzzerCallback.cpp](SGXFuzzerRT/libFuzzerCallback.cpp#L437)
+
+```shell
+cd ~/EnclaveFuzzData/SGX-WALLET/Fuzzer2-*
+python ~/EnclaveFuzz/Tool/filter_crashes.py -b TestApp -c ./result/crashes --extra-opt="-max_len=10000000"
 ```
 
 # Contact to me

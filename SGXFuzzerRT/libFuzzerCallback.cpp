@@ -430,10 +430,10 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   po::options_description desc("LibFuzzerCallback's inner options");
   auto add_opt = desc.add_options();
   add_opt("cb_help", "Produce help message");
-  add_opt("cb_enclave",
-          po::value<std::string>(&ClEnclaveFileName)
-              ->default_value("enclave.signed.so"),
-          "Name of target Enclave file");
+  add_opt(
+      "cb_enclave",
+      po::value<std::string>(&ClEnclaveFileName)->default_value("TestEnclave"),
+      "Name of target Enclave file");
   add_opt("cb_max_count", po::value<size_t>(&ClMaxCount)->default_value(32),
           "Max count of elements for pointer");
   add_opt("cb_max_size", po::value<size_t>(&ClMaxSize)->default_value(512),

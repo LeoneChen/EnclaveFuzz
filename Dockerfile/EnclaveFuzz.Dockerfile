@@ -63,4 +63,4 @@ RUN git submodule update --init --recursive ehsm
 
 WORKDIR /home/$USERNAME/EnclaveFuzz/SGX_APP/ehsm
 RUN ./build.sh MODE=DEBUG
-RUN /home/$USERNAME/EnclaveFuzz/Tool/workdir/setup.sh --app out/ehsm-core/ehsm_core_test --enclave out/ehsm-core/libenclave-ehsm-core.so --workdir /home/$USERNAME/EnclaveFuzzData/EHSM/Fuzzer2 --taskset 127
+RUN /home/$USERNAME/EnclaveFuzz/Tool/workdir/setup.sh --app out/ehsm-core/ehsm_core_test --enclave out/ehsm-core/libenclave-ehsm-core.so --workdir /home/$USERNAME/EnclaveFuzzData/EHSM/Fuzzer2 --taskset 0
