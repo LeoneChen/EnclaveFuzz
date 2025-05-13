@@ -79,6 +79,31 @@ cd ~/EnclaveFuzzData/SGX-WALLET/Fuzzer2-*
 # coverage_exp.log # it is log from libfuzzer
 ```
 
+`coverage_exp.log` is like this
+```shell
+[2025-05-13 17:13:48.542] [Init] Num of ECall: 5
+[2025-05-13 17:13:48.542] ECalls:
+  0 - fuzz_ecall_add_item
+  1 - fuzz_ecall_change_master_password
+  2 - fuzz_ecall_create_wallet
+  3 - fuzz_ecall_remove_item
+  4 - fuzz_ecall_show_wallet
+
+INFO: found LLVMFuzzerCustomMutator (0x3d0cc0). Disabling -len_control by default.
+INFO: libFuzzer ignores flags that start with '--'
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 3530517718
+INFO: Loaded 3 modules   (6617 inline 8-bit counters): 407 [0x7a2856e3b6d0, 0x7a2856e3b867), 5873 [0x7a2856f29398, 0x7a2856f2aa89), 337 [0x3f90e8, 0x3f9239), 
+INFO: Loaded 3 PC tables (6617 PCs): 407 [0x7a2856e3b868,0x7a2856e3d1d8), 5873 [0x7a2856f2aa90,0x7a2856f419a0), 337 [0x3f9240,0x3fa750), 
+INFO: -fork=1: fuzzing in separate process(s)
+INFO: -fork=1: 0 seed inputs, starting to fuzz in /home/admin/EnclaveFuzzData/SGX-WALLET/Fuzzer2-2025-05-13-16-46-36/libFuzzerTemp.FuzzWithFork46405.dir
+#8: cov: 0 ft: 0 corp: 0 exec/s 0 oom/timeout/crash: 0/0/0 time: 0s job: 1 dft_time: 0
+[SGXSan] ERROR: #PF Addr (nil) at pc 0x7871d6199915(A) => Null-Pointer Dereference
+#82: cov: 731 ft: 2080 corp: 6 exec/s 74 oom/timeout/crash: 0/0/1 time: 1s job: 2 dft_time: 0
+[SGXSan] ERROR: #PF Addr (nil) at pc 0x7507632ad915(A) => Null-Pointer Dereference
+#209: cov: 745 ft: 3150 corp: 38 exec/s 127 oom/timeout/crash: 0/0/2 time: 3s job: 3 dft_time: 0
+```
+
 After fuzzing, we can filter crash inputs.
 
 NOTICE: `extra-opt` should be same as flags in `~/EnclaveFuzzData/SGX-WALLET/Fuzzer2-*/fuzz.sh` to re-produce, e.g. flags in `fuzz.sh` is `--cb_enclave=TestEnclave -print_pcs=1 -print_coverage=1 -use_value_profile=1 -artifact_prefix=./result/crashes/ -ignore_crashes=1 -max_len=10000000 -timeout=60 -max_total_time=86400 -fork=1`. 
@@ -90,7 +115,41 @@ NOTICE: `extra-opt` should be same as flags in `~/EnclaveFuzzData/SGX-WALLET/Fuz
 ```shell
 cd ~/EnclaveFuzzData/SGX-WALLET/Fuzzer2-*
 python ~/EnclaveFuzz/Tool/filter_crashes.py -b TestApp -c ./result/crashes --extra-opt="-max_len=10000000"
+# it output simple-TestApp-xxx.result.json and TestApp-xxx.result.json
 ```
+
+`simple-TestApp-xxx.result.json` is like this, `hash2bt` is helpful to get backtrace from hash-id:
+```shell
+{
+    "0x7ffff7771915": {
+        "02ab79a1b091e33f9ffe19bd5008c5efea273d7cda4349682c0375243829b44b": {
+            "[SGXSan] ERROR: #PF Addr (nil) at pc 0x7ffff7771915(A) => Null-Pointer Dereference": {
+                "inputs": [
+                    "crash-40235d32d2ca2d1e21ccc691998188b2148e2cb6"
+                ],
+                "num_crashes": 5
+            }
+        },
+        "fdcd72ba0d57315d74185f652382e64f9de700b08288956456f99236b9b87aa4": {
+            "[SGXSan] ERROR: #PF Addr (nil) at pc 0x7ffff7771915(A) => Null-Pointer Dereference": {
+                "inputs": [
+                    "crash-20d888de888a5492af460970d3a7c994e22e474d"
+                ],
+                "num_crashes": 6
+            }
+        }
+    },
+    "hash2bt": {
+        "02ab79a1b091e33f9ffe19bd5008c5efea273d7cda4349682c0375243829b44b": [
+            "..."
+        ],
+        "fdcd72ba0d57315d74185f652382e64f9de700b08288956456f99236b9b87aa4": [
+            "..."
+        ]
+    }
+}
+```
+
 
 # Contact to me
 Any questions are welcome, you can ask them via issue or my email.
