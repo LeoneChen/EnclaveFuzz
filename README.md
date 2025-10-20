@@ -1,20 +1,30 @@
 # EnclaveFuzz: Finding Vulnerabilities in SGX Applications
 
-<a href="docs/EnclaveFuzz.pdf"><img align="right" width="170" height="220" src="docs/EnclaveFuzz.png">
-
-This repo is the public code for paper [EnclaveFuzz](docs/EnclaveFuzz.pdf) ([Slide](docs/Slide.pdf), [Poster_CN](docs/Poster.pdf)) in [NDSS 2024](https://www.ndss-symposium.org/ndss2024/)
+This repo is the public code for paper [EnclaveFuzz](docs/EnclaveFuzz.pdf) ([Slide](docs/EnclaveFuzzSlide.pdf)) in [NDSS 2024](https://www.ndss-symposium.org/ndss2024/)
 
 ```
-@inproceedings{chen2024enclavefuzz,
-    title={EnclaveFuzz: Finding Vulnerabilities in SGX Applications},
-    author={Chen, Liheng and Li, Zheming and Ma, Zheyu and Li, Yuan and Chen, Baojian and Zhang, Chao},
-    booktitle={Proceedings of the 31st Annual Network and Distributed System Security Symposium (NDSS)},
-    year={2024},
+@inproceedings{DBLP:conf/ndss/ChenLMLC024enclavefuzz,
+  author       = {Liheng Chen and
+                  Zheming Li and
+                  Zheyu Ma and
+                  Yuan Li and
+                  Baojian Chen and
+                  Chao Zhang},
+  title        = {EnclaveFuzz: Finding Vulnerabilities in {SGX} Applications},
+  booktitle    = {31st Annual Network and Distributed System Security Symposium, {NDSS}
+                  2024, San Diego, California, USA, February 26 - March 1, 2024},
+  publisher    = {The Internet Society},
+  year         = {2024},
+  url          = {https://www.ndss-symposium.org/ndss-paper/enclavefuzz-finding-vulnerabilities-in-sgx-applications/},
+  timestamp    = {Sun, 24 Aug 2025 10:43:35 +0200},
+  biburl       = {https://dblp.org/rec/conf/ndss/ChenLMLC024.bib},
+  bibsource    = {dblp computer science bibliography, https://dblp.org}
 }
 ```
 
 # Branch
-master - Use fuzzing optimized SGX SDK for fuzz (Fuzzer2.0 is a deprecated branch)
+
+master/Fuzzer2.0 - Use fuzzing optimized SGX SDK for fuzz
 
 Fuzzer1.0 - Use original SGX SDK for fuzz (support hardware mode and simulation mode)
 
