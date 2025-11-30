@@ -262,7 +262,6 @@ extern "C" sgx_status_t sgx_create_enclave_ex(
                                  ex_features, ex_features_p);
 }
 
-#ifndef KAFL_FUZZER
 extern "C" __attribute__((weak)) void
 __sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop);
 extern "C" __attribute__((weak)) void
@@ -352,7 +351,6 @@ extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
                                                  const uintptr_t *pcs_end) {
   gRepeater.RegisterSanCovPCs(pcs_beg, pcs_end);
 }
-#endif
 
 void ClearSticker() {
   g_enclave_ocall_table = nullptr;
@@ -364,10 +362,8 @@ void ClearSticker() {
 }
 
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
-#ifndef KAFL_FUZZER
   gRepeater.UnregisterSanCov8Bit();
   gRepeater.UnregisterSanCovPCs();
-#endif
 
   // Since we will access object belong to Enclave, so set RunInEnclave to true
   RunInEnclave = true;
@@ -386,7 +382,6 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   return SGX_SUCCESS;
 }
 
-#ifndef KAFL_FUZZER
 extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
 void (*TSticker__llvm_profile_write_file)(void);
 extern "C" void libFuzzerCrashCallback() {
@@ -401,7 +396,6 @@ extern "C" void libFuzzerCrashCallback() {
   if (__llvm_profile_write_file)
     __llvm_profile_write_file();
 }
-#endif
 
 extern "C" void GetEnclaveDSORange(uptr *start, uptr *end) {
   gEnclaveInfo.GetEnclaveDSORange(start, end);

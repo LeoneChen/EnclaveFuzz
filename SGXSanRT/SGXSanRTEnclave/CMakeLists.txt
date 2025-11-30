@@ -14,6 +14,3 @@ add_library(
     TSticker.cpp)
 
 set_target_properties(SGXSanRTEnclave PROPERTIES POSITION_INDEPENDENT_CODE True)
-if(KAFL_FUZZER)
-target_compile_definitions(SGXSanRTEnclave PUBLIC KAFL_FUZZER)
-endif()

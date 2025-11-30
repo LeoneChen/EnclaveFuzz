@@ -4,4 +4,6 @@ CompileFlags:
         -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/common/inc/internal,
         -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/common/inc/,
         -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/sdk/trts,
+        -I/home/leone/EnclaveFuzz/SGXSanRT,
+        -I/home/leone/EnclaveFuzz/SGXSanRT/SGXSanRTApp,
     ]

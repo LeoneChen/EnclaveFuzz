@@ -25,6 +25,3 @@ add_library(
     ${PLTHOOK_DIR}/plthook_elf.c)
 
 set_target_properties(SGXSanRTApp PROPERTIES POSITION_INDEPENDENT_CODE True)
-if(KAFL_FUZZER)
-target_compile_definitions(SGXSanRTApp PUBLIC KAFL_FUZZER)
-endif()

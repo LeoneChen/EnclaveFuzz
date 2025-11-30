@@ -45,10 +45,8 @@ static pthread_mutex_t heap_usage_mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
 const size_t kHeapObjectChunkMagic = 0xDEADBEEF;
 
-#ifndef KAFL_FUZZER
 std::set<uptr, std::less<uptr>, ContainerAllocator<uptr>> gHeapObjs;
 static pthread_mutex_t gHeapObjsUpdateMutex = PTHREAD_MUTEX_INITIALIZER;
-#endif
 
 struct chunk {
   size_t magic; // ensure queried user_beg is correct
@@ -143,7 +141,6 @@ void *MALLOC(size_t size) {
   PoisonShadow(right_redzone_beg, alloc_end - right_redzone_beg,
                kAsanHeapLeftRedzoneMagic);
 
-#ifndef KAFL_FUZZER
   if (RunInEnclave) {
     void *callPt = __builtin_return_address(0);
     if (gEnclaveInfo.isInEnclaveDSORange((uptr)callPt, 1) and
@@ -157,7 +154,6 @@ void *MALLOC(size_t size) {
       pthread_mutex_unlock(&gHeapObjsUpdateMutex);
     }
   }
-#endif
 
   return (void *)user_beg;
 }
@@ -205,13 +201,11 @@ void FREE(void *ptr) {
   qe.user_beg = user_beg;
   qe.user_size = m->user_size;
 
-#ifndef KAFL_FUZZER
   pthread_mutex_lock(&gHeapObjsUpdateMutex);
   if (gHeapObjs.count(user_beg)) {
     gHeapObjs.erase(user_beg);
   }
   pthread_mutex_unlock(&gHeapObjsUpdateMutex);
-#endif
 
   gQCache->put(qe);
   goto exit;
@@ -281,7 +275,6 @@ size_t MALLOC_USABLE_SIZE(void *mem) throw() {
 }
 
 void ClearHeapObject() {
-#ifndef KAFL_FUZZER
   pthread_mutex_lock(&gHeapObjsUpdateMutex);
   for (auto user_beg : gHeapObjs) {
     if ((void *)user_beg == nullptr)
@@ -306,7 +299,6 @@ void ClearHeapObject() {
   }
   gHeapObjs.clear();
   pthread_mutex_unlock(&gHeapObjsUpdateMutex);
-#endif
 }
 
 void QuarantineCache::show() {

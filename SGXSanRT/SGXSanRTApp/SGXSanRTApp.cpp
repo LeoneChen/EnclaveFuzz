@@ -72,7 +72,6 @@ static void PrintAddressSpaceLayout(log_level ll = LOG_LEVEL_DEBUG) {
              (void *)kHighMemBeg, (void *)kHighMemEnd);
 }
 
-#ifndef KAFL_FUZZER
 typedef void (*DieCallbackType)(void);
 static DieCallbackType UserDieCallback;
 void SetUserDieCallback(DieCallbackType callback) {
@@ -84,7 +83,6 @@ void NORETURN Die() {
     UserDieCallback();
   _Exit(77);
 }
-#endif
 
 // https://maskray.me/blog/2022-04-10-unwinding-through-signal-handler
 extern "C" void sgxsan_signal_safe_dump_bt_buf(uint64_t *bt_buf,
@@ -118,83 +116,6 @@ extern "C" void sgxsan_signal_safe_dump_bt() {
 
   sgxsan_signal_safe_dump_bt_buf(bt_buf, bt_cnt);
 }
-
-#ifdef KAFL_FUZZER
-
-extern "C" int DFGetInt32();
-extern "C" __attribute__((weak)) void
-FuzzerSignalCB(int signum, siginfo_t *siginfo, void *priv);
-extern "C" __attribute__((weak)) void FuzzerCrashCB();
-
-void NORETURN Die() {
-  if (FuzzerCrashCB)
-    FuzzerCrashCB();
-  _Exit(1);
-}
-
-/// \brief Signal handler to report illegal memory access
-static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
-  ucontext_t *uc = (ucontext_t *)priv;
-  const greg_t rip = uc->uc_mcontext.gregs[REG_RIP];
-  greg_t *const rip_p = &uc->uc_mcontext.gregs[REG_RIP];
-  auto PCOrEnclaveOffset = GetOffsetIfEnclave(rip);
-  if (siginfo->si_signo == SIGSEGV) {
-    if (siginfo->si_code == SI_KERNEL) {
-      // If si_code is SI_KERNEL, #PF address is not true
-      log_error("#PF Addr Unknown at pc %p(%c)\n", (void *)PCOrEnclaveOffset,
-                (PCOrEnclaveOffset == (uintptr_t)rip) ? 'A' : 'E');
-    } else {
-      size_t page_size = getpagesize();
-      // process siginfo
-      void *_page_fault_addr = siginfo->si_addr;
-      log_error("#PF Addr %p at pc %p(%c) => ", _page_fault_addr,
-                (void *)PCOrEnclaveOffset,
-                (PCOrEnclaveOffset == (uintptr_t)rip) ? 'A' : 'E');
-
-      uint64_t page_fault_addr = (uint64_t)_page_fault_addr;
-      if (0 <= page_fault_addr and page_fault_addr < page_size) {
-        log_error_np("Null-Pointer Dereference\n");
-      } else if ((kLowShadowGuardBeg <= page_fault_addr &&
-                  page_fault_addr < kLowShadowBeg) ||
-                 (kHighShadowEnd < page_fault_addr &&
-                  page_fault_addr <= kHighShadowGuardEnd)) {
-        log_error_np("ShadowMap's Guard Dereference\n");
-      } else if ((kHighShadowEnd + 1 - page_size) <= page_fault_addr &&
-                 page_fault_addr <= kHighShadowEnd) {
-        log_error_np("Cross ShadowMap's Guard Dereference\n");
-      } else if (kShadowGapBeg <= page_fault_addr &&
-                 page_fault_addr < kShadowGapEnd) {
-        log_error_np("ShadowMap's GAP Dereference\n");
-      } else {
-        log_error_np("Unknown page fault\n");
-      }
-    }
-  } else if (siginfo->si_signo == SIGILL) {
-    if (*(uint32_t *)rip == 0x29ae0f48 /* XRSTOR64 RCX */) {
-      *rip_p += 4;
-      return;
-    } else if ((*(uint32_t *)rip & 0xFFFFFF) == 0xf0c70f /* RDRAND EAX */) {
-      uc->uc_mcontext.gregs[REG_RAX] = DFGetInt32();
-      uc->uc_mcontext.gregs[REG_EFL] = 1; // CF->1 others->0
-      *rip_p += 3;
-      return;
-    } else if ((*(uint32_t *)rip & 0xFFFFFF) == 0xf6c70f /* RDRAND ESI */) {
-      uc->uc_mcontext.gregs[REG_RSI] = DFGetInt32();
-      uc->uc_mcontext.gregs[REG_EFL] = 1; // CF->1 others->0
-      *rip_p += 3;
-      return;
-    }
-    log_error("SIGILL opcode is %lx\n", *(uint32_t *)rip);
-  } else {
-    log_error("Signal %d\n", siginfo->si_signo);
-  }
-
-  sgxsan_signal_safe_dump_bt();
-  if (FuzzerSignalCB)
-    FuzzerSignalCB(signum, siginfo, priv);
-  Die();
-}
-#else
 
 extern "C" __attribute__((alias("sgxsan_signal_safe_dump_bt")))
 SANITIZER_INTERFACE_ATTRIBUTE void
@@ -264,7 +185,6 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   }
   _Exit(-1);
 }
-#endif
 
 void register_sgxsan_sigaction() {
   static bool AlreadyRegisterSignalHandler = false;
@@ -276,16 +196,6 @@ void register_sgxsan_sigaction() {
   sig_act.sa_flags = SA_SIGINFO;
   sigemptyset(&sig_act.sa_mask);
   sgxsan_assert(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]));
-#ifdef KAFL_FUZZER
-  sgxsan_assert(0 == sigaction(SIGFPE, &sig_act, &g_old_sigact[SIGFPE]));
-  sgxsan_assert(0 == sigaction(SIGBUS, &sig_act, &g_old_sigact[SIGBUS]));
-  sgxsan_assert(0 == sigaction(SIGILL, &sig_act, &g_old_sigact[SIGILL]));
-  sgxsan_assert(0 == sigaction(SIGABRT, &sig_act, &g_old_sigact[SIGABRT]));
-  sgxsan_assert(0 == sigaction(SIGIOT, &sig_act, &g_old_sigact[SIGIOT]));
-  sgxsan_assert(0 == sigaction(SIGTRAP, &sig_act, &g_old_sigact[SIGTRAP]));
-  sgxsan_assert(0 == sigaction(SIGSYS, &sig_act, &g_old_sigact[SIGSYS]));
-  sgxsan_assert(0 == sigaction(SIGUSR2, &sig_act, &g_old_sigact[SIGUSR2]));
-#else
   // Override libFuzzer's SIGALRM Handler
   struct sigaction sig_timeoue_act;
   memset(&sig_timeoue_act, 0, sizeof(sig_timeoue_act));
@@ -295,7 +205,6 @@ void register_sgxsan_sigaction() {
   // sgxsan_assert(0 ==
   //               sigaction(SIGALRM, &sig_timeoue_act,
   //               &g_old_sigact[SIGALRM]));
-#endif
   AlreadyRegisterSignalHandler = true;
 }
 
@@ -334,7 +243,6 @@ static void sgxsan_init_shadow_memory() {
   }
 }
 
-#ifndef KAFL_FUZZER
 int hook_enclave() {
   plthook_t *plthook;
   std::string fileName = gEnclaveInfo.GetEnclaveFileName();
@@ -358,7 +266,6 @@ int hook_enclave() {
   plthook_close(plthook);
   return 0;
 }
-#endif
 
 __attribute__((constructor)) void SGXSanInit() {
   if (asan_inited) {

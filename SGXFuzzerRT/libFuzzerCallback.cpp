@@ -35,11 +35,6 @@
 #include <unordered_set>
 #include <vector>
 
-#ifdef KAFL_FUZZER
-extern "C" {
-#include "nyx_agent.h"
-}
-#endif
 
 #define X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS 47
 #define ADDR_SPACE_BITS X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS
@@ -112,32 +107,17 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
   if (with_prefix) {
     std::string prefix = std::string(log_level_to_prefix[level]) + "[" +
                          time_in_HH_MM_SS_MMM() + "] ";
-#ifdef KAFL_FUZZER
-    hprintf("%s", prefix.c_str());
-#else
     std::cerr << prefix;
-#endif
   }
 
-#ifdef KAFL_FUZZER
-  char buf[BUFSIZ];
-  va_list ap;
-  va_start(ap, format);
-  vsnprintf(buf, BUFSIZ, format, ap);
-  va_end(ap);
-  hprintf("%s", buf);
-#else
   va_list ap;
   va_start(ap, format);
   vfprintf(stderr, format, ap);
   va_end(ap);
-#endif
 }
 
-#ifndef KAFL_FUZZER
 // libFuzzer API
 extern "C" size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
-#endif
 extern "C" __attribute__((weak)) bool AddrIsInHeapQuarantine(uint64_t addr);
 // DataFactory Util
 class FuzzDataFactory {
@@ -154,7 +134,6 @@ public:
 
   void NeedMoreFuzzData(size_t size) { mExpectedFuzzDataSize += size; }
 
-#ifndef KAFL_FUZZER
   size_t mutate(uint8_t *Data, size_t Size, size_t MaxSize) {
     size_t NewSize = std::min(std::max(mExpectedFuzzDataSize, Size), MaxSize);
     sgxfuzz_assert(NewSize >= Size);
@@ -164,7 +143,6 @@ public:
     LLVMFuzzerMutate(Data, NewSize, MaxSize);
     return NewSize;
   }
-#endif
 
   uint8_t *getBytes(uint8_t *dst, size_t bytesNum, FuzzDataTy dataTy) {
     if (bytesNum == 0 and dataTy != FUZZ_STRING and dataTy != FUZZ_WSTRING) {
@@ -571,7 +549,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   return 0;
 }
 
-#ifndef KAFL_FUZZER
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                           size_t MaxSize, unsigned int Seed) {
   return data_factory.mutate(Data, Size, MaxSize);
@@ -585,19 +562,15 @@ extern "C" void LLVMFuzzerEarlyAfterRunOne() {
 }
 
 extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
-#endif
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   log_always("Start LLVMFuzzerTestOneInput\n");
-#ifndef KAFL_FUZZER
   // Remove last round environment remain
   if (SGXFuzzerEnvClearBeforeTest) {
     sgxfuzz_assert(SGXFuzzerEnvClearBeforeTest() == 0);
   }
-#endif
   data_factory.init(Data, Size);
 
   sgx_status_t ret = SGX_ERROR_UNEXPECTED;
-#ifndef KAFL_FUZZER
   // Initialize Enclave
   ret = sgx_create_enclave(ClEnclaveFileName.c_str(),
                            SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL,
@@ -606,7 +579,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   // Reinit after create
   data_factory.init(Data, Size);
 
-#endif
   // Test body
   std::vector<int> callSeq;
   if (gFuzzMode == TEST_USER) {
@@ -629,24 +601,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
                   "[FAIL] ECall: %s", gFuzzECallNameArray[i]);
   }
 
-#ifdef KAFL_FUZZER
-  bool isStarve = false;
-  if (data_factory.GetExpectedFuzzDataSize() > Size) {
-    log_always("Expected size:%d, given size: %d\n",
-               data_factory.GetExpectedFuzzDataSize(), Size);
-    isStarve = true;
-  }
-  kAFL_hypercall(HYPERCALL_KAFL_RELEASE, isStarve);
-  log_error("After release, shouldn't reach here\n");
-#endif
   data_factory.clear();
 
-#ifdef KAFL_FUZZER
-  // Destroy Enclave
-  sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
-                    SGX_SUCCESS,
-                "[FAIL] Enclave destroy");
-#endif
   return 0;
 }
 
@@ -709,130 +665,3 @@ extern "C" bool DFEnableSanCheckDie() {
 extern "C" bool DFEnableCollectStack() { return ClEnableCollectStack; }
 extern "C" bool DFCmpFuncNameInTOCTOU() { return ClCmpFuncNameInTOCTOU; }
 extern "C" bool DFUseAddr2line() { return ClUseAddr2line; }
-
-#ifdef KAFL_FUZZER
-extern "C" void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }
-extern "C" void FuzzerSignalCB(int signum, siginfo_t *siginfo, void *priv) {
-  ucontext_t *uc = (ucontext_t *)priv;
-  uint64_t reason = 0x8000000000000000ULL | uc->uc_mcontext.gregs[REG_RIP] |
-                    ((uint64_t)siginfo->si_signo << 47);
-  kAFL_hypercall(HYPERCALL_KAFL_PANIC, reason);
-}
-
-int agent_init(int verbose) {
-  // Handshake with front end
-  kAFL_hypercall(HYPERCALL_KAFL_ACQUIRE, 0);
-  kAFL_hypercall(HYPERCALL_KAFL_RELEASE, 0);
-
-  get_nyx_cpu_type();
-
-  // Get host config
-  host_config_t host_config;
-  kAFL_hypercall(HYPERCALL_KAFL_GET_HOST_CONFIG, (uintptr_t)&host_config);
-
-  if (verbose) {
-    fprintf(stderr, "GET_HOST_CONFIG\n");
-    fprintf(stderr, "\thost magic:  0x%x, version: 0x%x\n",
-            host_config.host_magic, host_config.host_version);
-    fprintf(stderr, "\tbitmap size: 0x%x, ijon:    0x%x\n",
-            host_config.bitmap_size, host_config.ijon_bitmap_size);
-    fprintf(stderr, "\tpayload size: %u KB\n",
-            host_config.payload_buffer_size / 1024);
-    fprintf(stderr, "\tworker id: %d\n", host_config.worker_id);
-  }
-
-  if (host_config.host_magic != NYX_HOST_MAGIC) {
-    hprintf("HOST_MAGIC mismatch: %08x != %08x\n", host_config.host_magic,
-            NYX_HOST_MAGIC);
-    habort((char *)"HOST_MAGIC mismatch!");
-    return -1;
-  }
-
-  if (host_config.host_version != NYX_HOST_VERSION) {
-    hprintf("HOST_VERSION mismatch: %08x != %08x\n", host_config.host_version,
-            NYX_HOST_VERSION);
-    habort((char *)"HOST_VERSION mismatch!");
-    return -1;
-  }
-
-  if (host_config.payload_buffer_size > ClMaxPayloadSize) {
-    hprintf("Fuzzer payload size too large: %lu > %lu\n",
-            host_config.payload_buffer_size, ClMaxPayloadSize);
-    habort((char *)"Host payload size too large!");
-    return -1;
-  }
-
-  agent_config_t agent_config = {0};
-  agent_config.agent_magic = NYX_AGENT_MAGIC;
-  agent_config.agent_version = NYX_AGENT_VERSION;
-  // agent_config.agent_timeout_detection = 0; // timeout by host
-  // agent_config.agent_tracing = 0; // trace by host
-  // agent_config.agent_ijon_tracing = 0; // no IJON
-  agent_config.agent_non_reload_mode = 0; // no persistent mode
-  // agent_config.trace_buffer_vaddr = 0xdeadbeef;
-  // agent_config.ijon_trace_buffer_vaddr = 0xdeadbeef;
-  agent_config.coverage_bitmap_size = host_config.bitmap_size;
-  // agent_config.input_buffer_size;
-  // agent_config.dump_payloads; // set by hypervisor (??)
-
-  kAFL_hypercall(HYPERCALL_KAFL_SET_AGENT_CONFIG, (uintptr_t)&agent_config);
-
-  return 0;
-}
-
-extern "C" void GetEnclaveDSORange(uintptr_t *start, uintptr_t *end);
-int main(int argc, char **argv) {
-  LLVMFuzzerInitialize(&argc, &argv);
-  agent_init(1);
-
-  // Register payload buffer
-  kAFL_payload *pbuf =
-      (kAFL_payload *)malloc_resident_pages(ClMaxPayloadSize / PAGE_SIZE);
-  assert(pbuf);
-  kAFL_hypercall(HYPERCALL_KAFL_GET_PAYLOAD, (uint64_t)pbuf);
-
-  int status = 0;
-  pid_t pid = -1;
-  while (1) {
-    hprintf("[IMPORTANT] Parent Process Loop\n");
-    pid = fork();
-    assert(pid != -1);
-
-    if (!pid) {
-      log_always("Start FuzzerTestOneInput\n");
-
-      // Initialize Enclave
-      sgx_status_t ret = sgx_create_enclave(
-          ClEnclaveFileName.c_str(),
-          SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL, NULL,
-          &__hidden_sgxfuzzer_harness_global_eid, NULL);
-      sgxfuzz_error(ret != SGX_SUCCESS, "[FAIL] Enclave initilize");
-
-      uintptr_t EnclaveStart, EnclaveEnd;
-      GetEnclaveDSORange(&EnclaveStart, &EnclaveEnd);
-      hrange_submit(0, EnclaveStart, EnclaveEnd);
-      hprintf("[hrange] Submit range %lu: 0x%08lx-0x%08lx\n", 0, EnclaveStart,
-              EnclaveEnd);
-
-      kAFL_hypercall(HYPERCALL_KAFL_USER_FAST_ACQUIRE, 0);
-      log_always("Data %p %d\n", pbuf->data, pbuf->size);
-      LLVMFuzzerTestOneInput(pbuf->data, pbuf->size);
-      return -1;
-    } else if (pid > 0) {
-      waitpid(pid, &status, WUNTRACED);
-      if (WIFEXITED(status)) {
-        hprintf("[IMPORTANT] Test Child Process Exit: %d\n",
-                WEXITSTATUS(status));
-      } else if (WIFSIGNALED(status)) {
-        hprintf("[IMPORTANT] Test Child Process Signal: %d\n",
-                WTERMSIG(status));
-      } else if (WIFSTOPPED(status)) {
-        hprintf("[IMPORTANT] Test Child Process Stop: %d\n", WSTOPSIG(status));
-      } else {
-        hprintf("[IMPORTANT] Test Child Process Exit Unexpectedly\n");
-      }
-      kAFL_hypercall(HYPERCALL_KAFL_RELEASE, 0);
-    }
-  }
-}
-#endif

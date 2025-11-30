@@ -16,9 +16,6 @@
 [submodule "ThirdParty/linux-sgx"]
 	path = ThirdParty/linux-sgx
 	url = git@github.com:LeoneChen/linux-sgx.git
-[submodule "kAFL"]
-	path = kAFL
-	url = git@github.com:IntelLabs/kAFL.git
 [submodule "ThirdParty/intel-sgx-ssl"]
 	path = ThirdParty/intel-sgx-ssl
 	url = git@github.com:LeoneChen/intel-sgx-ssl.git

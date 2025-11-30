@@ -10,11 +10,7 @@
 class RandPool {
 public:
   RandPool() {
-#ifdef KAFL_FUZZER
-    mRandFilePath = std::string("./rand_file");
-#else
     mRandFilePath = std::string(SGXSAN_DIR "/Tool/rand_file");
-#endif
     int fd = open(mRandFilePath.c_str(), O_RDONLY);
     sgxfuzz_assert(fd != -1);
     sgxfuzz_assert(lseek(fd, 0, mRandPoolSize) == 0);

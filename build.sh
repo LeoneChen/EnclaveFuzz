@@ -37,7 +37,7 @@ show_help() {
     echo "  --build-ssl         Build SGX SSL"
 }
 
-OPTS=$(getopt -o hg -l help,kafl,cov,prepare-sdk,build-sdk,build-ssl -n 'parse-options' -- "$@")
+OPTS=$(getopt -o hg -l help,cov,prepare-sdk,build-sdk,build-ssl -n 'parse-options' -- "$@")
 eval set -- "$OPTS"
 while true; do
     case "$1" in
@@ -49,10 +49,6 @@ while true; do
             MODE="DEBUG"
             COMMON_COMPILE_FLAGS+=" -g -O0"
             export DEBUG=1
-            shift
-            ;;
-        --kafl)
-            FUZZER="KAFL"
             shift
             ;;
         --cov)
@@ -87,7 +83,7 @@ INSTALL_DIR=${PROJ_DIR}/install_dir/${MODE}-${FUZZER}-install
 COMMON_COMPILE_FLAGS+=" -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes -Wno-unused-command-line-argument"
 ENCLAVE_COMPILE_FLAGS+=" -fno-discard-value-names -flegacy-pass-manager -Xclang -load -Xclang ${INSTALL_DIR}/lib64/libSGXSanPass.so"
 
-if [[ "${FUZZER}" = "LIBFUZZER" && "${INST_COV}" = "TRUE" ]]
+if [[ "${INST_COV}" = "TRUE" ]]
 then
     HOST_COMPILE_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp -fprofile-instr-generate -fcoverage-mapping -fuse-ld=${LD}"
     ENCLAVE_COMPILE_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp -fprofile-instr-generate -fcoverage-mapping -fuse-ld=${LD}"
@@ -98,13 +94,6 @@ then
     CMAKE_FLAGS+=" -DCMAKE_BUILD_TYPE=Debug"
 else
     CMAKE_FLAGS+=" -DCMAKE_BUILD_TYPE=Release"
-fi
-
-if [[ "${FUZZER}" = "KAFL" ]]
-then
-    CMAKE_FLAGS+=" -DKAFL_FUZZER=1"
-else
-    CMAKE_FLAGS+=" -DKAFL_FUZZER=0"
 fi
 
 echo "[+] Mode: ${MODE}"
