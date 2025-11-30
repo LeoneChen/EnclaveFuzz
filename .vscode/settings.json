@@ -110,5 +110,6 @@
         "thread": "cpp",
         "cfenv": "cpp"
     },
-    "C_Cpp.clang_format_fallbackStyle": "LLVM"
+    "C_Cpp.clang_format_fallbackStyle": "LLVM",
+    "terminal.integrated.scrollback": 100000
 }

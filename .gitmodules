@@ -22,3 +22,6 @@
 [submodule "ThirdParty/intel-sgx-ssl"]
 	path = ThirdParty/intel-sgx-ssl
 	url = git@github.com:LeoneChen/intel-sgx-ssl.git
+[submodule "test_apps/TaLoS"]
+	path = test_apps/TaLoS
+	url = git@github.com:LeoneChen/TaLoS.git

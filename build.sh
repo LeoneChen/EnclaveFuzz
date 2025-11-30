@@ -11,6 +11,7 @@ FUZZER="LIBFUZZER"
 INST_COV="FALSE"
 PREPARE_SDK=0
 BUILD_SDK=0
+BUILD_SSL=0
 
 CC=clang-13
 CXX=clang++-13
@@ -33,15 +34,16 @@ show_help() {
     echo "  --cov               Instrument coverage for SGXSDK (libfuzzer only)"
     echo "  --prepare-sdk       Prepare SGX SDK (only once needed)"
     echo "  --build-sdk         Build SGX SDK"
-    exit 0
+    echo "  --build-ssl         Build SGX SSL"
 }
 
-OPTS=$(getopt -o hg -l help,kafl,cov,prepare-sdk,build-sdk -n 'parse-options' -- "$@")
+OPTS=$(getopt -o hg -l help,kafl,cov,prepare-sdk,build-sdk,build-ssl -n 'parse-options' -- "$@")
 eval set -- "$OPTS"
 while true; do
     case "$1" in
         -h|--help)
             show_help
+            exit 0
             ;;
         -g)
             MODE="DEBUG"
@@ -65,12 +67,17 @@ while true; do
             BUILD_SDK=1
             shift
             ;;
+        --build-ssl)
+            BUILD_SSL=1
+            shift
+            ;;
         --)
             shift
             break
             ;;
         *)
             show_help
+            exit 1
             ;;
     esac
 done
@@ -127,7 +134,10 @@ popd
 
 ########## Build EnclaveFuzz and Sticker ##########
 CC="${CC}" CXX="${CXX}" cmake -S . -B ${BUILD_DIR} -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} ${CMAKE_FLAGS}
-cmake --build ${BUILD_DIR} -j$(nproc)
+cmake --build ${BUILD_DIR} -j${JOBS}
+# pushd ${BUILD_DIR}
+#     make VERBOSE=1
+# popd
 cmake --install ${BUILD_DIR}
 
 ln -sf ${INSTALL_DIR} install
@@ -248,7 +258,10 @@ if [ ${BUILD_SDK} -eq 1 ]; then
     make clean -s
     make -j${JOBS}
     cp sgx_sign ${INSTALL_DIR}/bin/x64
+fi
 
+########## Build SGX SSL ##########
+if [ ${BUILD_SSL} -eq 1 ]; then
     echo "== Get Intel SGXSSL =="
     cd ${PROJ_DIR}/ThirdParty/intel-sgx-ssl
     ./clean.sh

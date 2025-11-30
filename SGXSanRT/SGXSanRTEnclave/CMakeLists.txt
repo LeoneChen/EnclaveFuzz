@@ -3,9 +3,9 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
 
 include_directories(
     ${LINUX_SGX_SRC_DIR}/common/inc
-    ${LINUX_SGX_MINI}/common/inc/internal
-    ${LINUX_SGX_MINI}/sdk/simulation/tinst
-    ${LINUX_SGX_MINI}/sdk/trts
+    ${LINUX_SGX_SRC_DIR}/common/inc/internal
+    ${LINUX_SGX_SRC_DIR}/sdk/simulation/tinst
+    ${LINUX_SGX_SRC_DIR}/sdk/trts
     ../SGXSanRTApp
     ../)
 

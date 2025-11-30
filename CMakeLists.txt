@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.16)
 project(SGXSan)
 
 set(LINUX_SGX_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/linux-sgx")
-set(LINUX_SGX_MINI "${CMAKE_CURRENT_SOURCE_DIR}/SGXSanRT/linux-sgx-mini/")
 set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(KAFL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/kAFL)
 set(KAFL_EXAMPLES_DIR ${KAFL_DIR}/kafl/examples)
@@ -55,10 +54,6 @@ if(KAFL_FUZZER)
 endif()
 
 install(DIRECTORY
-    ${LINUX_SGX_MINI}/common/inc/ DESTINATION include
-    PATTERN common/inc/internal EXCLUDE)
-
-install(DIRECTORY
     ${LINUX_SGX_SRC_DIR}/common/inc/
     ${LINUX_SGX_SRC_DIR}/external/dcap_source/QuoteGeneration/pce_wrapper/inc/
     ${LINUX_SGX_SRC_DIR}/external/dcap_source/QuoteGeneration/quote_wrapper/ql/inc/
@@ -71,12 +66,16 @@ install(DIRECTORY
 )
 
 install(FILES
-        ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm.h
-        ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm_primitives.h
-        ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm_rt_abstraction.h
-        ${LINUX_SGX_SRC_DIR}/external/dcap_source/QuoteGeneration/qpl/inc/sgx_default_quote_provider.h
-        ${LINUX_SGX_SRC_DIR}/psw/enclave_common/sgx_enclave_common.h
-        DESTINATION include)
+    ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm.h
+    ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm_primitives.h
+    ${LINUX_SGX_SRC_DIR}/external/sgx-emm/emm_src/include/sgx_mm_rt_abstraction.h
+    ${LINUX_SGX_SRC_DIR}/external/dcap_source/QuoteGeneration/qpl/inc/sgx_default_quote_provider.h
+    ${LINUX_SGX_SRC_DIR}/psw/enclave_common/sgx_enclave_common.h
+    DESTINATION include)
+
+install(FILES
+    ${LINUX_SGX_SRC_DIR}/common/inc/tlibc/mbusafecrt.h
+    DESTINATION include/tlibc)
 
 install(FILES ThirdParty/edger8r/_build/default/linux/Edger8r.bc
     PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ

@@ -1,0 +1,7 @@
+CompileFlags:
+    Add: [
+        -I/home/leone/EnclaveFuzz/test_apps/TaLoS/src/libressl-2.4.1/include,
+        -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/common/inc/internal,
+        -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/common/inc/,
+        -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/sdk/trts,
+    ]
