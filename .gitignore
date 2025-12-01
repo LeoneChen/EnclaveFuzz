@@ -2,9 +2,17 @@
 *.a
 *.so
 build_dir
+build
 install_dir
 install
 sgx_edger8r
 vtune
 picture
 SGX_APP
+workdir
+
+
+# Added by cargo
+
+target
+Cargo.lock

@@ -22,3 +22,6 @@
 [submodule "test_apps/TaLoS"]
 	path = test_apps/TaLoS
 	url = git@github.com:LeoneChen/TaLoS.git
+[submodule "ThirdParty/LibAFL"]
+	path = ThirdParty/LibAFL
+	url = git@github.com:AFLplusplus/LibAFL.git

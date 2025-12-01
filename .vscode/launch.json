@@ -449,18 +449,16 @@
             ]
         },
         {
-            "name": "(sgx-wallet) Launch",
+            "name": "main",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/sgx-walletHost",
-            "args": [
-                "--cb_dbg_input=/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/seeds/seed",
-            ],
+            "program": "${workspaceFolder}/target/debug/EnclaveFuzz",
+            "args": [],
             "stopAtEntry": false,
-            "cwd": "/home/leone/Documents/SGXSan/SGX_APP/sgx-wallet/",
+            "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
-            "MIMode": "gdb",
+            "miDebuggerPath": "/home/leone/.cargo/bin/rust-gdb",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
@@ -482,25 +480,15 @@
             ]
         },
         {
-            "name": "(sgx-reencrypt) Launch",
+            "name": "TestApp",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/SGX_APP/sgx-reencrypt/bin/test-app",
+            "program": "${workspaceFolder}/workdir/INTEL-SGXSSL/Fuzzer2-2025-12-01-15-11-10/TestApp",
             "args": [
-                "./seeds",
-                "-artifact_prefix=./crashes/",
-                // "./crashes/crash-da39a3ee5e6b4b0d3255bfef95601890afd80709",
-                "-verbosity=2",
-                "--cb_max_count=8",
-                "-max_len=1000000",
-                "--cb_log_level=4",
-                "--cb_provide_nullptr=true",
-                "--cb_provide_nullptr_probability=0",
-                // "-fork=1",
-                // "-ignore_crashes=1",
+                "./result/crashes/crash-0a2b9652fa5408d7e274f10135546e1b5220034c",
             ],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/SGX_APP/sgx-reencrypt",
+            "cwd": "${workspaceFolder}/workdir/INTEL-SGXSSL/Fuzzer2-2025-12-01-15-11-10/",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
