@@ -57,7 +57,7 @@ int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
 bool ClEnableSanCheckDie, ClEnableNaiveHarness, ClEnableCollectStack,
-    ClCmpFuncNameInTOCTOU, ClUseAddr2line;
+    ClCmpFuncNameInTOCTOU;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER };
@@ -480,9 +480,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_cmp_func_name_in_toctou",
           po::value<bool>(&ClCmpFuncNameInTOCTOU)->default_value(false),
           "Compare function name when checking TOCTOU");
-  add_opt("cb_use_addr2line",
-          po::value<bool>(&ClUseAddr2line)->default_value(false),
-          "Use addr2line to get stack frame info");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -708,7 +705,6 @@ extern "C" bool DFEnableSanCheckDie() {
 
 extern "C" bool DFEnableCollectStack() { return ClEnableCollectStack; }
 extern "C" bool DFCmpFuncNameInTOCTOU() { return ClCmpFuncNameInTOCTOU; }
-extern "C" bool DFUseAddr2line() { return ClUseAddr2line; }
 
 #ifdef KAFL_FUZZER
 extern "C" void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }

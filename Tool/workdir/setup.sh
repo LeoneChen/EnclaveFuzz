@@ -36,7 +36,7 @@ while true; do
             shift 2
             ;;
         --workdir)
-            WORKDIR="$2-$(date +%F-%H-%M-%S)"
+            WORKDIR="$2"
             shift 2
             ;;
         --taskset)

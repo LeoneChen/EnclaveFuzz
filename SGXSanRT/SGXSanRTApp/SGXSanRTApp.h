@@ -42,7 +42,7 @@ typedef signed long sptr;
   uptr pc = (uptr)__builtin_return_address(0);                                 \
   uptr bp = (uptr)__builtin_frame_address(0);                                  \
   uptr local_stack;                                                            \
-  uptr sp = (uptr)&local_stack
+  uptr sp = (uptr) & local_stack
 
 /// mem layout
 #define kLowMemBeg 0
@@ -112,9 +112,6 @@ struct MallocFreeBTTy {
 extern "C" {
 void sgxsan_dump_bt_buf(void **array, size_t size);
 void sgxsan_backtrace(log_level ll = LOG_LEVEL_ERROR);
-
-void sgxsan_signal_safe_dump_bt();
-void sgxsan_signal_safe_dump_bt_buf(uint64_t *bt_buf, size_t bt_cnt);
 
 void ReportError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                  uptr access_size, const char *msg, ...);
