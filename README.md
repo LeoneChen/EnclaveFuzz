@@ -51,10 +51,7 @@ cd ..
 ```
 
 ## Get prepared SGX applications
-We have prepared all modified SGX applications which we can directly fuzz.
-```shell
-git clone git@github.com:LeoneChen/SGX_APP.git
-```
+We have prepared all modified SGX applications in `SGX_APP` which we can directly fuzz.
 
 ### Branch of each SGX application
 Fuzzer2.0 - Use fuzzing optimized SGX SDK for fuzz

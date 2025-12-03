@@ -11,6 +11,7 @@
 #include "routine.h"
 #include "rts_cmd.h"
 #include "sgx_edger8r.h"
+#include "sgx_error.h"
 #include "sgx_key.h"
 #include "sgx_report.h"
 #include "sgx_thread.h"

@@ -1,0 +1,12 @@
+{
+	"servers": {
+		"gdb-mcp": {
+			"type": "stdio",
+			"command": "node",
+			"args": [
+				"/home/leone/EnclaveFuzz/ThirdParty/mcp-gdb/build/index.js"
+			]
+		}
+	},
+	"inputs": []
+}
