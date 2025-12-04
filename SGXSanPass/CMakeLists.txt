@@ -5,4 +5,3 @@ include_directories(${LLVM_INCLUDE_DIRS} ../ThirdParty/json/single_include ${CMA
 add_library(SGXSanPass MODULE SGXSanPass.cpp AddressSanitizer.cpp PassUtil.cpp FuncRenamePass.cpp LLVMStructTypeSerialize.cpp)
 
 add_library(FuncRenamePass MODULE FuncRenamePass.cpp)
-add_library(GetOCallTable MODULE GetOCallTable.cpp)

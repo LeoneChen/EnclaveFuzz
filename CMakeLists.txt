@@ -33,7 +33,6 @@ install(TARGETS
         SGXFuzzerPass
         SGXFuzzerRT
         FuncRenamePass
-        GetOCallTable
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
 

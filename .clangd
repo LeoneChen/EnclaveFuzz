@@ -5,7 +5,11 @@ CompileFlags:
         -I/home/leone/EnclaveFuzz/SGXSanRT/linux-sgx-mini/common/inc/internal,
         -I/home/leone/EnclaveFuzz/SGXSanRT/linux-sgx-mini/sdk/trts/,
         -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/common/inc,
+        -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/common/inc/internal,
+        -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/psw/urts,
+        -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/psw/urts/linux,
         -I/home/leone/EnclaveFuzz/ThirdParty/plthook,
+        -I/usr/include/llvm-13,
         # TALOS
         -I/home/leone/EnclaveFuzz/SGX_APP/TaLoS/src/libressl/crypto,
         -I/home/leone/EnclaveFuzz/SGX_APP/TaLoS/src/libressl/include/,

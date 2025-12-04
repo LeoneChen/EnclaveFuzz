@@ -198,22 +198,19 @@
             ]
         },
         {
-            "name": "Edger8r",
-            "type": "ocamlearlybird",
+            "name": "sgx-edger8r",
+            "type": "ocaml.earlybird",
             "request": "launch",
-            "stopOnEntry": false,
-            "console": "integratedTerminal",
-            "program": "/home/leone/Documents/SGXSan/edger8r/linux/_build/Edger8r.byte",
-            "yieldSteps": 1024,
-            "cwd": "/home/leone/Documents/SGXSan/SGX_APP/BiORAM-SGX/build/Enclave",
+            "program": "${workspaceFolder}/ThirdParty/edger8r/_build/default/linux/Edger8r.bc",
             "arguments": [
+                "--untrusted",
+                "enclave.edl",
                 "--search-path",
-                "/home/leone/Documents/SGXSan/install/include",
-                "--search-path",
-                "..",
-                "--trusted",
-                "../../Enclave/Enclave.edl",
-            ]
+                "/home/leone/EnclaveFuzz/install/include",
+                "--dump-parse",
+                "Enclave.edl.json"
+            ],
+            "cwd": "/home/leone/EnclaveFuzz/SGX_APP/TaLoS/src/libressl/crypto",
         },
         {
             "name": "(QuoteGenerationSample) Launch",
