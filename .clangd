@@ -9,6 +9,9 @@ CompileFlags:
         -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/psw/urts,
         -I/home/leone/EnclaveFuzz/ThirdParty/linux-sgx/psw/urts/linux,
         -I/home/leone/EnclaveFuzz/ThirdParty/plthook,
+        -I/home/leone/EnclaveFuzz/ThirdParty/json/single_include,
+        -I/home/leone/EnclaveFuzz/ThirdParty/magic_enum/include,
+        -I/usr/lib/llvm-13/lib/clang/13.0.1/include/fuzzer,
         -I/usr/include/llvm-13,
         # TALOS
         -I/home/leone/EnclaveFuzz/SGX_APP/TaLoS/src/libressl/crypto,
