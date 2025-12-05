@@ -1,5 +1,7 @@
 CompileFlags:
     Add: [
+        -I/home/leone/EnclaveFuzz/SGXFuzzerRT,
+        -I/home/leone/EnclaveFuzz/SGXSanPass,
         -I/home/leone/EnclaveFuzz/SGXSanRT,
         -I/home/leone/EnclaveFuzz/SGXSanRT/SGXSanRTApp,
         -I/home/leone/EnclaveFuzz/SGXSanRT/linux-sgx-mini/common/inc/internal,
@@ -12,6 +14,7 @@ CompileFlags:
         -I/home/leone/EnclaveFuzz/ThirdParty/json/single_include,
         -I/home/leone/EnclaveFuzz/ThirdParty/magic_enum/include,
         -I/usr/lib/llvm-13/lib/clang/13.0.1/include/fuzzer,
+        -I/usr/lib/llvm-13/include/,
         -I/usr/include/llvm-13,
         # TALOS
         -I/home/leone/EnclaveFuzz/SGX_APP/TaLoS/src/libressl/crypto,
