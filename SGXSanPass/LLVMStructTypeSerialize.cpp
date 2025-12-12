@@ -1,4 +1,5 @@
 #include "LLVMStructTypeSerialize.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include <fstream>
@@ -10,15 +11,8 @@ using namespace llvm;
 
 std::string GetTypeName(const Type *ty) {
   std::string str;
-  if (const StructType *structTy = dyn_cast<StructType>(ty)) {
-    str = structTy->getName();
-  } else {
-    raw_string_ostream ss(str);
-    ty->print(ss, false, true);
-    if (str[0] == '%') {
-      str.erase(0, 1);
-    }
-  }
+  raw_string_ostream ss(str);
+  ty->print(ss, false, true);
   return str;
 }
 
@@ -54,7 +48,13 @@ void Serializer::RecGetTypeJson(ordered_json &json, const Type *ty) {
 }
 
 void Serializer::SerializeStructType(StructType *structTy, ordered_json &json) {
-  auto structName = structTy->getName();
+  auto structName = GetTypeName(structTy);
+  // errs() << "[*] structName: " << structName << "\n";
+  if (StringRef(structName).startswith("\%struct.anon") ||
+      StringRef(structName).startswith("\%union.anon")) {
+    return;
+  }
+  // errs() << "[+] structName: " << structName << "\n";
   for (size_t idx = 0; idx < structTy->getNumElements(); idx++) {
     RecGetTypeJson(json[structName][std::to_string(idx)],
                    structTy->getElementType(idx));

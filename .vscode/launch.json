@@ -201,16 +201,18 @@
             "name": "sgx-edger8r",
             "type": "ocaml.earlybird",
             "request": "launch",
-            "program": "${workspaceFolder}/ThirdParty/edger8r/_build/default/linux/Edger8r.bc",
+            "program": "${workspaceFolder}/ThirdParty/edger8r/_build/install/default/bin/edger8r",
             "arguments": [
                 "--untrusted",
                 "enclave.edl",
                 "--search-path",
                 "/home/leone/EnclaveFuzz/install/include",
-                "--dump-parse",
-                "Enclave.edl.json"
+                "--typeinfo-dir",
+                "/home/leone/EnclaveFuzz/SGX_APP/TaLoS/src/libressl/",
+                "--include-path",
+                "../include/"
             ],
-            "cwd": "/home/leone/EnclaveFuzz/SGX_APP/TaLoS/src/libressl/crypto",
+            "cwd": "${workspaceFolder}/SGX_APP/TaLoS/src/libressl/crypto",
         },
         {
             "name": "(QuoteGenerationSample) Launch",
@@ -252,7 +254,7 @@
                 "-Xclang",
                 "-load",
                 "-Xclang",
-                "../../../../../SGXSan/install/lib64/libSGXFuzzerPass.so",
+                "../../../../../SGXSan/install/lib64/libSGXSanPass.so -mllvm -sgx-fuzzer=true",
                 "-mllvm",
                 "--max-depth-recursively-prepare-pointer=6",
                 "-Xclang",

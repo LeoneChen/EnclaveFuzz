@@ -1,5 +1,4 @@
 #include "libFuzzerCallback.h"
-#include "FuzzDataType.h"
 #include "FuzzedDataProvider.h"
 #include "RandPool.h"
 #include "magic_enum.hpp"
@@ -57,6 +56,20 @@ int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
 bool ClEnableSanCheckDie, ClEnableNaiveHarness, ClEnableCollectStack;
+
+enum FuzzDataTy {
+  FUZZ_STRING,
+  FUZZ_WSTRING,
+  FUZZ_DATA,
+  FUZZ_ARRAY,
+  FUZZ_SIZE,
+  FUZZ_COUNT,
+  FUZZ_RET,
+  FUZZ_BOOL_SET_NULL,
+  FUZZ_SEQ,
+  FUZZ_P_DOUBLE,
+  FUZZ_DATA_OR_PTR,
+};
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER };
