@@ -19,8 +19,6 @@ struct FetchInfo {
   bool toCmp = false;
 };
 
-extern "C" __attribute__((weak)) bool DFCmpFuncNameInTOCTOU();
-
 class MemAccessMgr {
 public:
   /* Statistics each ECall */
@@ -95,12 +93,10 @@ public:
         // if parent function name is not known, assume at same function and
         // only check overlap
         bool at_same_func = true;
-        if (DFCmpFuncNameInTOCTOU and DFCmpFuncNameInTOCTOU()) {
-          if (funcName)
-            at_same_func = strncmp(control_fetch.funcName, funcName,
-                                   std::min((size_t)FUNC_NAME_MAX_LEN,
-                                            strlen(funcName))) == 0;
-        }
+        if (funcName)
+          at_same_func = strncmp(control_fetch.funcName, funcName,
+                                 std::min((size_t)FUNC_NAME_MAX_LEN,
+                                          strlen(funcName))) == 0;
         bool is_overlap =
             RangesOverlap((const char *)control_fetch.addr, control_fetch.size,
                           (const char *)ptr, size);

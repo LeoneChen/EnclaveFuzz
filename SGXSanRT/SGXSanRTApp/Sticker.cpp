@@ -11,6 +11,7 @@
 #include "routine.h"
 #include "rts_cmd.h"
 #include "sgx_edger8r.h"
+#include "sgx_error.h"
 #include "sgx_key.h"
 #include "sgx_report.h"
 #include "sgx_thread.h"
@@ -385,23 +386,6 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   ClearHeapObject();
   return SGX_SUCCESS;
 }
-
-#ifndef KAFL_FUZZER
-extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
-void (*TSticker__llvm_profile_write_file)(void);
-extern "C" void libFuzzerCrashCallback() {
-  // Maybe enclave is destoryed
-  if (gEnclaveInfo.GetHandler()) {
-    TSticker__llvm_profile_write_file =
-        (decltype(TSticker__llvm_profile_write_file))dlsym(
-            gEnclaveInfo.GetHandler(), "TSticker__llvm_profile_write_file");
-    if (TSticker__llvm_profile_write_file)
-      TSticker__llvm_profile_write_file();
-  }
-  if (__llvm_profile_write_file)
-    __llvm_profile_write_file();
-}
-#endif
 
 extern "C" void GetEnclaveDSORange(uptr *start, uptr *end) {
   gEnclaveInfo.GetEnclaveDSORange(start, end);

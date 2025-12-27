@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        ".clangd": "yaml",
         "*.in": "cpp",
         "iomanip": "cpp",
         "exception": "cpp",
