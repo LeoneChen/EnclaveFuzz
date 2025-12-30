@@ -3,7 +3,6 @@
 //
 #pragma once
 
-#include "nlohmann/json.hpp"
 #include "sgx_urts.h"
 #include <algorithm>
 #include <cstddef>

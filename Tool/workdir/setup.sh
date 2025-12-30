@@ -36,7 +36,7 @@ while true; do
             shift 2
             ;;
         --workdir)
-            WORKDIR="$2-$(date +%F-%H-%M-%S)"
+            WORKDIR="$2"
             shift 2
             ;;
         --taskset)
@@ -59,11 +59,9 @@ echo "[+] WORKDIR: ${WORKDIR}"
 echo "[+] TASKSET: ${TASKSET}"
 
 echo "[+] Build work directory"
-mkdir -p ${WORKDIR}/result/{seeds,crashes,profraw}
+mkdir -p ${WORKDIR}/result/{seeds,crashes}
 cp ${APP_PATH} ${WORKDIR}/TestApp
 cp ${ENCLAVE_PATH} ${WORKDIR}/TestEnclave
-cp ${SCRIPT_DIR}/show_cov.sh ${WORKDIR}
 cp ${SCRIPT_DIR}/stop.sh ${WORKDIR}
 ENCLAVEFUZZ_DIR=$(realpath ${SCRIPT_DIR}/../../install) JOBS=${JOBS} TASKSET=${TASKSET} envsubst '${ENCLAVEFUZZ_DIR} ${JOBS} ${TASKSET}' < ${SCRIPT_DIR}/fuzz.sh > ${WORKDIR}/fuzz.sh
-JOBS=${JOBS} envsubst '${JOBS}' < ${SCRIPT_DIR}/merge.sh > ${WORKDIR}/merge.sh
-chmod +x ${WORKDIR}/fuzz.sh ${WORKDIR}/merge.sh
+chmod +x ${WORKDIR}/fuzz.sh

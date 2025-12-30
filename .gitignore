@@ -1,10 +1,9 @@
 *.o
 *.a
 *.so
-build_dir
-install_dir
+build
 install
 sgx_edger8r
-vtune
-picture
-SGX_APP
+/workdir/
+pyscript
+temp

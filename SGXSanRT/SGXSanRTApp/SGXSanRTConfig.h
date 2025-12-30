@@ -1,6 +1,5 @@
 #pragma once
 
-#define DUMP_STACK_TRACE 1
 // 0 -> LOG_LEVEL_NONE,
 // 1 -> LOG_LEVEL_ERROR,
 // 2 -> LOG_LEVEL_WARNING, (Default)

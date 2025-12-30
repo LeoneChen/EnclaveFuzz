@@ -162,16 +162,11 @@ void AddressInOutEnclaveStatusAndPoisonStatus(
     if (LIKELY(shadow_value == 0)) {
       addrPoisonStatus = NotPoisoned;
     } else {
-      int8_t L2Bits = L2F(shadow_value);
-      if (L2Bits) {
-        addrPoisonStatus = IsPoisoned;
-      } else {
-        int8_t L1Bits = L1F(shadow_value);
-        // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
-        uint8_t last_accessed_byte = addr & (SHADOW_GRANULARITY - 1);
-        addrPoisonStatus =
-            last_accessed_byte >= L1Bits ? IsPoisoned : NotPoisoned;
-      }
+      int8_t L1Bits = L1F(shadow_value);
+      // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
+      uint8_t last_accessed_byte = addr & (SHADOW_GRANULARITY - 1);
+      addrPoisonStatus =
+          last_accessed_byte >= L1Bits ? IsPoisoned : NotPoisoned;
     }
   }
 }
@@ -542,27 +537,6 @@ int sgx_is_outside_enclave(const void *addr, size_t size) {
     return 0;
 }
 
-/// \param srcSize can't be 0
-#define LEAK_CHECK_MT(srcInOutEnclave, dstInOutEnclave, srcAddr, srcSize)      \
-  do {                                                                         \
-    if (srcInOutEnclave == InEnclave && dstInOutEnclave == OutEnclave) {       \
-      if (RunInEnclave) {                                                      \
-        InOutEnclaveStatus _srcInOutEnclave;                                   \
-        PoisonStatus _srcPoisonedStatus;                                       \
-        RegionInOutEnclaveStatusAndPoisonStatus(                               \
-            (uptr)srcAddr, srcSize, _srcInOutEnclave, _srcPoisonedStatus,      \
-            kL2Filter);                                                        \
-        sgxsan_assert(_srcInOutEnclave == InEnclave);                          \
-        if (_srcPoisonedStatus != NotPoisoned) {                               \
-          GET_CALLER_PC_BP_SP;                                                 \
-          ReportGenericError(pc, bp, sp, (uptr)srcAddr, 0, srcSize, false,     \
-                             "Plaintext Transfer");                            \
-        }                                                                      \
-        check_output_hybrid((uptr)srcAddr, srcSize);                           \
-      }                                                                        \
-    }                                                                          \
-  } while (0);
-
 extern "C" {
 /// Memory Intrinsics Callback
 void *__asan_memcpy(void *dst, const void *src, uptr size) {
@@ -584,7 +558,6 @@ void *__asan_memcpy(void *dst, const void *src, uptr size) {
     uptr srcPoisonedAddr, dstPoisonedAddr;
     RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false);
     RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-    LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, size);
   }
   return memcpy(dst, src, size);
 }
@@ -608,7 +581,6 @@ void *__asan_memmove(void *dst, const void *src, uptr size) {
     uptr srcPoisonedAddr, dstPoisonedAddr;
     RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false);
     RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-    LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, size);
   }
   return memmove(dst, src, size);
 }
@@ -641,7 +613,6 @@ errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
     uptr srcPoisonedAddr, dstPoisonedAddr;
     RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false);
     RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-    LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, count);
   }
   return memcpy_s(dst, dstSize, src, count);
 }
@@ -667,7 +638,6 @@ errno_t __sgxsan_memmove_s(void *dst, size_t dstSize, const void *src,
     uptr srcPoisonedAddr, dstPoisonedAddr;
     RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false);
     RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-    LEAK_CHECK_MT(srcInOutEnclaveStatus, dstInOutEnclaveStatus, src, count);
   }
   return memmove_s(dst, dstSize, src, count);
 }

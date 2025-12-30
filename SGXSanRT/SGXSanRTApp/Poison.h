@@ -18,9 +18,6 @@ const int kAsanGlobalRedzoneMagic = 0x89 /* 0xf9 */;
 const int kAsanHeapLeftRedzoneMagic = 0x8a /* 0xfa */;
 const int kAsanHeapFreeMagic = 0x8d /* 0xfd */;
 const int kAsanInternalHeapMagic = 0x8e /* 0xfe */;
-/// Mark sensitive area
-const int kSGXSanSensitiveLayout = 0x10;
-const int kSGXSanSensitiveObjData = 0x20;
 /// Indicate memory byte is of Enclave or not
 const int kSGXSanInEnclaveMagic = 0x40;
 
@@ -52,18 +49,6 @@ void FastPoisonShadowPartialRightRedzone(uptr aligned_addr, uptr size,
                                          uint8_t rz_value);
 void PoisonShadow(uptr addr, uptr size, uint8_t value,
                   bool returnBackToNormal = false);
-
-/// Level 2 Poison
-///
-/// Used to shallow poison sensitive data
-/// Filter
-#define kL2Filter 0x30
-#define L2F(ShadowValue) (ShadowValue & kL2Filter)
-/// Poison
-void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value,
-                         bool doPoison = true);
-void MoveShallowShadow(uptr dst_addr, uptr src_addr, uptr dst_size,
-                       uptr copy_cnt);
 
 #if defined(__cplusplus)
 }

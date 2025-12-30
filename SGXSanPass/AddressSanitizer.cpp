@@ -184,11 +184,6 @@ const char kAMDGPUAddressPrivateName[] = "llvm.amdgcn.is.private";
 static const unsigned kAllocaRzSize = 32;
 
 // Command-line flags.
-
-static cl::opt<bool> ClInEnclave("in-enclave",
-                                 cl::desc("in Enclave or Host App"), cl::Hidden,
-                                 cl::init(true));
-
 static cl::opt<bool>
     ClEnableKasan("sgxsan-kernel",
                   cl::desc("Enable KernelAddressSanitizer instrumentation"),
@@ -3777,9 +3772,7 @@ void FunctionStackPoisoner::processStaticAllocas() {
   auto ShadowAfterScope = GetShadowBytesAfterScope(SVD, L);
   for (auto &byte : ShadowAfterScope) {
     byte &= kSGXSanL1Filter;
-    if (ClInEnclave) {
-      byte |= kSGXSanInEnclaveMagic;
-    }
+    byte |= kSGXSanInEnclaveMagic;
   }
 
   // Poison the stack red zones at the entry.
@@ -3792,9 +3785,7 @@ void FunctionStackPoisoner::processStaticAllocas() {
     auto ShadowInScope = GetShadowBytes(SVD, L);
     for (auto &byte : ShadowInScope) {
       byte &= kSGXSanL1Filter;
-      if (ClInEnclave) {
-        byte |= kSGXSanInEnclaveMagic;
-      }
+      byte |= kSGXSanInEnclaveMagic;
     }
 
     // Poison static allocas near lifetime intrinsics.

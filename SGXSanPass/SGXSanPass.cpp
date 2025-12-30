@@ -1,5 +1,4 @@
 #include "AddressSanitizer.h"
-#include "FuncRenamePass.h"
 #include "PassUtil.h"
 #include "nlohmann/json.hpp"
 #include "llvm/ADT/Statistic.h"
@@ -59,49 +58,16 @@ struct SGXSanLegacyPass : public ModulePass {
   bool DefaultRenameFunc(Module &M) {
     bool changed = false;
     std::string RenamePrefix = "__hidden_in_enclave_";
-    std::vector<std::string> FuncRenameList{"access",
-                                            "close",
-                                            "dlclose",
-                                            "dlerror",
-                                            "dlopen",
-                                            "dlsym",
-                                            "dl_iterate_phdr",
-                                            "fchmod",
-                                            "fchown",
-                                            "fclose",
-                                            "fcntl",
-                                            "fcntl64",
-                                            "fdopen",
-                                            "fflush",
-                                            "fileno",
-                                            "fopen",
-                                            "fseek",
-                                            "fsync",
-                                            "ftell",
-                                            "ftruncate",
-                                            "fwrite",
-                                            "getcwd",
-                                            "getenv",
-                                            "geteuid",
-                                            "getpid",
-                                            "gettimeofday",
-                                            "localtime",
-                                            "lseek64",
-                                            "mkdir",
-                                            "mmap",
-                                            "mmap64",
-                                            "mremap",
-                                            "munmap",
-                                            "open",
-                                            "open64",
-                                            "readlink"
-                                            "rmdir",
-                                            "setenv",
-                                            "sleep",
-                                            "time",
-                                            "unlink",
-                                            "utimes",
-                                            "write"};
+    std::vector<std::string> FuncRenameList{
+        "access",       "close",           "dlclose", "dlerror", "dlopen",
+        "dlsym",        "dl_iterate_phdr", "fchmod",  "fchown",  "fclose",
+        "fcntl",        "fcntl64",         "fdopen",  "fflush",  "fileno",
+        "fopen",        "fseek",           "fsync",   "ftell",   "ftruncate",
+        "fwrite",       "getcwd",          "getenv",  "geteuid", "getpid",
+        "gettimeofday", "localtime",       "lseek64", "mkdir",   "mmap",
+        "mmap64",       "mremap",          "munmap",  "open",    "open64",
+        "readlink",     "rmdir",           "setenv",  "sleep",   "time",
+        "unlink",       "utimes",          "write"};
     for (auto origName : FuncRenameList) {
       auto F = M.getFunction(origName);
       if (F) {
@@ -119,7 +85,6 @@ struct SGXSanLegacyPass : public ModulePass {
     bool Changed = false;
 
     DumpModuleStructs(M);
-    Changed |= RenameFuncSym(M);
     Changed |= DefaultRenameFunc(M);
 
     // run SGXSan Pass

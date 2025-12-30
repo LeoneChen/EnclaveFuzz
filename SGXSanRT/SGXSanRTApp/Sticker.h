@@ -5,9 +5,7 @@
 #include <link.h>
 #include <map>
 
-typedef std::map<uptr, uptr, std::less<uptr>,
-                 ContainerAllocator<std::pair<const uptr, uptr>>>
-    AddrRangeType;
+typedef std::map<uptr, uptr> AddrRangeType;
 enum ECallCheckType { CHECK_ECALL_PRIVATE, CHECK_ECALL_ALLOWED };
 
 extern bool __thread RunInEnclave;
@@ -102,6 +100,7 @@ public:
     for (auto pair : mEnclaveDSOStart2End) {
       uptr beg = pair.first, end = pair.second;
       bool origInEnclave = false;
+      sgxsan_assert(RunInEnclave);
       if (RunInEnclave == false)
         RunInEnclave = true;
       else

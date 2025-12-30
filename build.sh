@@ -12,14 +12,12 @@ INST_COV="FALSE"
 PREPARE_SDK=0
 BUILD_SDK=0
 
-CC=clang-13
-CXX=clang++-13
-# lld make src-cov work as expected
-LD=lld
+CC=${PROJ_DIR}/install/llvm-project/bin/clang
+CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
+
 JOBS=$(nproc)
 
 CMAKE_FLAGS=""
-HOST_COMPILE_FLAGS=""
 COMMON_COMPILE_FLAGS=""
 ENCLAVE_COMPILE_FLAGS=""
 
@@ -75,15 +73,14 @@ while true; do
     esac
 done
 
-BUILD_DIR=${PROJ_DIR}/build_dir/${MODE}-${FUZZER}-build
-INSTALL_DIR=${PROJ_DIR}/install_dir/${MODE}-${FUZZER}-install
+BUILD_DIR=${PROJ_DIR}/build/enclave_fuzz
+INSTALL_DIR=${PROJ_DIR}/install/enclave_fuzz
 COMMON_COMPILE_FLAGS+=" -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes -Wno-unused-command-line-argument"
 ENCLAVE_COMPILE_FLAGS+=" -fno-discard-value-names -flegacy-pass-manager -Xclang -load -Xclang ${INSTALL_DIR}/lib64/libSGXSanPass.so"
 
 if [[ "${FUZZER}" = "LIBFUZZER" && "${INST_COV}" = "TRUE" ]]
 then
-    HOST_COMPILE_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp -fprofile-instr-generate -fcoverage-mapping -fuse-ld=${LD}"
-    ENCLAVE_COMPILE_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp -fprofile-instr-generate -fcoverage-mapping -fuse-ld=${LD}"
+    ENCLAVE_COMPILE_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp -mllvm -sanitizer-coverage-for-enclave"
 fi
 
 if [[ "${MODE}" = "DEBUG" ]]
@@ -102,13 +99,10 @@ fi
 
 echo "[+] Mode: ${MODE}"
 echo "[+] Fuzzer: ${FUZZER}"
-echo "[+] Build at: ${BUILD_DIR}"
-echo "[+] Install at: ${INSTALL_DIR}"
 echo "[+] Instrument coverage: ${INST_COV}"
 echo "[+] CC: ${CC}"
 echo "[+] CXX: ${CXX}"
 echo "[+] CMAKE_FLAGS: ${CMAKE_FLAGS}"
-echo "[+] HOST_COMPILE_FLAGS: ${HOST_COMPILE_FLAGS}"
 echo "[+] COMMON_COMPILE_FLAGS: ${COMMON_COMPILE_FLAGS}"
 echo "[+] ENCLAVE_COMPILE_FLAGS: ${ENCLAVE_COMPILE_FLAGS}"
 
@@ -128,9 +122,10 @@ popd
 ########## Build EnclaveFuzz and Sticker ##########
 CC="${CC}" CXX="${CXX}" cmake -S . -B ${BUILD_DIR} -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} ${CMAKE_FLAGS}
 cmake --build ${BUILD_DIR} -j$(nproc)
+# pushd ${BUILD_DIR}
+#     make VERBOSE=1
+# popd
 cmake --install ${BUILD_DIR}
-
-ln -sf ${INSTALL_DIR} install
 
 ########## Build SGX SDK ##########
 if [ ${BUILD_SDK} -eq 1 ]; then
@@ -143,38 +138,33 @@ if [ ${BUILD_SDK} -eq 1 ]; then
 
     get_host_lib() {
         echo "== Get $2 =="
-        cd $1
-        make clean -s
-        make -j${JOBS} -s CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${HOST_COMPILE_FLAGS} ${COMMON_COMPILE_FLAGS}"
-        cp $2 ${INSTALL_DIR}/lib64
-    }
-
-    get_host_lib_orig() {
-        echo "== Get $2 =="
-        cd $1
-        make clean -s
-        make -j${JOBS} -s
-        cp $2 ${INSTALL_DIR}/lib64
+        pushd $1
+            make clean -s
+            make -j${JOBS} -s COMMON_FLAGS="${COMMON_COMPILE_FLAGS}"
+            cp $2 ${INSTALL_DIR}/lib64
+        popd
     }
 
     get_enclave_lib() {
         echo "== Get $2 =="
-        cd $1
-        make clean -s
-        make -j${JOBS} -s CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ENCLAVE_COMPILE_FLAGS} ${COMMON_COMPILE_FLAGS}"
-        cp $2 ${INSTALL_DIR}/lib64
+        pushd $1
+            make clean -s
+            make -j${JOBS} -s CC="${CC}" CXX="${CXX}" COMMON_FLAGS="${ENCLAVE_COMPILE_FLAGS} ${COMMON_COMPILE_FLAGS}"
+            cp $2 ${INSTALL_DIR}/lib64
+        popd
     }
 
     get_enclave_lib_orig() {
         echo "== Get $2 =="
-        cd $1
-        make clean -s
-        make -j${JOBS} -s
-        cp $2 ${INSTALL_DIR}/lib64
+        pushd $1
+            make clean -s
+            make -j${JOBS} -s
+            cp $2 ${INSTALL_DIR}/lib64
+        popd
     }
 
     ########## HOST ##########
-    get_host_lib_orig "${SGXSDK_DIR}/psw/urts/linux"                                 "libsgx_urts.so"
+    get_host_lib "${SGXSDK_DIR}/psw/urts/linux"                                      "libsgx_urts.so"
     ln -sf libsgx_urts.so ${INSTALL_DIR}/lib64/libsgx_urts.so.2
     get_host_lib "${SGXSDK_DIR}/psw/enclave_common"                                "libsgx_enclave_common.so libsgx_enclave_common.a"
     ln -sf libsgx_enclave_common.so ${INSTALL_DIR}/lib64/libsgx_enclave_common.so.1
@@ -244,21 +234,24 @@ if [ ${BUILD_SDK} -eq 1 ]; then
 
     ########## TOOL ##########
     echo "== Get sgx_sign =="
-    cd ${SGXSDK_DIR}/sdk/sign_tool/SignTool
-    make clean -s
-    make -j${JOBS}
-    cp sgx_sign ${INSTALL_DIR}/bin/x64
+    pushd ${SGXSDK_DIR}/sdk/sign_tool/SignTool
+        make clean -s
+        make -j${JOBS}
+        cp sgx_sign ${INSTALL_DIR}/bin/x64
+    popd
 
     echo "== Get Intel SGXSSL =="
-    cd ${PROJ_DIR}/ThirdParty/intel-sgx-ssl
-    ./clean.sh
-    ./build.sh MODE=${MODE} FUZZER=${FUZZER} INST_COV=${INST_COV}
-    cp -rf ${PROJ_DIR}/ThirdParty/intel-sgx-ssl/Linux/package/* ${INSTALL_DIR}/sgxssl/
-    cd ${INSTALL_DIR}/sgxssl/lib64
-    if [[ ! -f libsgx_tsgxssl.a && -f libsgx_tsgxssld.a ]]; then ln -sf libsgx_tsgxssld.a libsgx_tsgxssl.a; fi
-    if [[ ! -f libsgx_tsgxssl_crypto.a && -f libsgx_tsgxssl_cryptod.a ]]; then ln -sf libsgx_tsgxssl_cryptod.a libsgx_tsgxssl_crypto.a; fi
-    if [[ ! -f libsgx_usgxssl.a && -f libsgx_usgxssld.a ]]; then ln -sf libsgx_usgxssld.a libsgx_usgxssl.a; fi
-    if [[ ! -f libsgx_tsgxssl_ssl.a && -f libsgx_tsgxssl_ssld.a ]]; then ln -sf libsgx_tsgxssl_ssld.a libsgx_tsgxssl_ssl.a; fi
+    pushd ${PROJ_DIR}/ThirdParty/intel-sgx-ssl
+        ./clean.sh
+        ./build.sh MODE=${MODE} FUZZER=${FUZZER} INST_COV=${INST_COV}
+        cp -rf ${PROJ_DIR}/ThirdParty/intel-sgx-ssl/Linux/package/* ${INSTALL_DIR}/sgxssl/
+    popd
+    pushd ${INSTALL_DIR}/sgxssl/lib64
+        if [[ ! -f libsgx_tsgxssl.a && -f libsgx_tsgxssld.a ]]; then ln -sf libsgx_tsgxssld.a libsgx_tsgxssl.a; fi
+        if [[ ! -f libsgx_tsgxssl_crypto.a && -f libsgx_tsgxssl_cryptod.a ]]; then ln -sf libsgx_tsgxssl_cryptod.a libsgx_tsgxssl_crypto.a; fi
+        if [[ ! -f libsgx_usgxssl.a && -f libsgx_usgxssld.a ]]; then ln -sf libsgx_usgxssld.a libsgx_usgxssl.a; fi
+        if [[ ! -f libsgx_tsgxssl_ssl.a && -f libsgx_tsgxssl_ssld.a ]]; then ln -sf libsgx_tsgxssl_ssld.a libsgx_tsgxssl_ssl.a; fi
+    popd
 
     echo "== Successfully get SGXSDK ${MODE} =="
 fi

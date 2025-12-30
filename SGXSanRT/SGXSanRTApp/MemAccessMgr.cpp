@@ -3,8 +3,6 @@
 thread_local std::deque<FetchInfo> MemAccessMgr::m_control_fetchs;
 __thread bool MemAccessMgr::m_active;
 __thread bool MemAccessMgr::m_inited;
-__thread size_t MemAccessMgr::m_out_enclave_access_cnt;
-__thread size_t MemAccessMgr::m_in_enclave_access_cnt;
 
 extern "C" __attribute__((weak)) bool DFEnableModifyDoubleFetchValue();
 extern "C" __attribute__((weak)) uint8_t *DFGetBytesEx(uint8_t *ptr,
@@ -39,18 +37,13 @@ void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
       }
     }
   }
-  MemAccessMgr::add_out_of_enclave_access_cnt();
 }
 
 void MemAccessMgrActive() { MemAccessMgr::active(); }
 
 void MemAccessMgrDeactive() { MemAccessMgr::deactive(); }
 
-void MemAccessMgrInEnclaveAccess() {
-#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
-  MemAccessMgr::add_in_enclave_access_cnt();
-#endif
-}
+void MemAccessMgrInEnclaveAccess() {}
 
 void MemAccessMgrClear() { MemAccessMgr::clear(); }
 

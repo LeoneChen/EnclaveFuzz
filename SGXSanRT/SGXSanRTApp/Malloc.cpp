@@ -2,19 +2,12 @@
 #include "Malloc.h"
 #include "MemAccessMgr.h"
 #include "Poison.h"
+#include "SGXSanRTApp.h"
 #include "Sticker.h"
 #include <algorithm>
 #include <set>
 #include <string.h>
 #include <tuple>
-
-#define DEFINE_BACK_END(sym) decltype(sym) *BACK_END(sym)
-DEFINE_BACK_END(malloc) = __libc_malloc;
-DEFINE_BACK_END(free) = __libc_free;
-DEFINE_BACK_END(calloc) = __libc_calloc;
-DEFINE_BACK_END(realloc) = __libc_realloc;
-DEFINE_BACK_END(malloc_usable_size) = nullptr;
-#undef DEFINE_BACK_END
 
 SGXSanHeapBacktrace *gHeapBT = nullptr;
 QuarantineCache *gQCache = nullptr;
@@ -25,19 +18,9 @@ void updateBackEndHeapAllocator() {
   // needn't consider multi-thread situation
   if (alreadyUpdateBackEndHeapAllocator)
     return;
-#define GET_BACK_END(sym)                                                      \
-  sgxsan_assert(BACK_END(sym) = (decltype(sym) *)dlsym(RTLD_NEXT, #sym))
-  GET_BACK_END(malloc);
-  GET_BACK_END(free);
-  GET_BACK_END(calloc);
-  GET_BACK_END(realloc);
-  GET_BACK_END(malloc_usable_size);
-#undef GET_BACK_END
   // Never free, since they are still used when exit()
-  void *p = BACKEND_MALLOC(sizeof(SGXSanHeapBacktrace));
-  gHeapBT = new (p) SGXSanHeapBacktrace();
-  p = BACKEND_MALLOC(sizeof(QuarantineCache));
-  gQCache = new (p) QuarantineCache();
+  gHeapBT = new SGXSanHeapBacktrace();
+  gQCache = new QuarantineCache();
   alreadyUpdateBackEndHeapAllocator = true;
 }
 
@@ -46,7 +29,7 @@ size_t global_heap_usage = 0;
 const size_t kHeapObjectChunkMagic = 0xDEADBEEF;
 
 #ifndef KAFL_FUZZER
-std::set<uptr, std::less<uptr>, ContainerAllocator<uptr>> gHeapObjs;
+std::set<uptr> gHeapObjs;
 static pthread_mutex_t gHeapObjsUpdateMutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
@@ -63,7 +46,7 @@ void update_heap_usage(void *ptr, bool true_add_false_minus) {
   if (ptr) {
     pthread_mutex_lock(&heap_usage_mutex);
     heapLogIndex++;
-    size_t allocated_size = BACKEND_MALLOC_USABLE_SIZE(ptr);
+    size_t allocated_size = malloc_usable_size(ptr);
     if (true_add_false_minus) {
       log_trace("(%ld)[HEAP SIZE] 0x%lx=0x%lx+0x%lx\n", heapLogIndex,
                 global_heap_usage + allocated_size, global_heap_usage,
@@ -84,7 +67,7 @@ void update_heap_usage(void *ptr, bool true_add_false_minus) {
 #endif
 }
 
-void *MALLOC(size_t size) {
+void *sgxsan_malloc(size_t size) {
   updateBackEndHeapAllocator();
   // if (size == 0) {
   //   sgxsan_warning(true, "Malloc 0 size\n");
@@ -92,7 +75,7 @@ void *MALLOC(size_t size) {
   // }
 
   if (not asan_inited) {
-    auto p = BACKEND_MALLOC(size);
+    auto p = malloc(size);
     update_heap_usage(p);
     return p;
   }
@@ -104,13 +87,13 @@ void *MALLOC(size_t size) {
   uptr rounded_size = RoundUpTo(size, alignment);
   uptr needed_size = rounded_size + 2 * rz_size;
 
-  void *allocated = BACKEND_MALLOC(needed_size);
+  void *allocated = malloc(needed_size);
   if (allocated == nullptr) {
     return nullptr;
   }
   update_heap_usage(allocated);
 
-  size_t allocated_size = BACKEND_MALLOC_USABLE_SIZE(allocated);
+  size_t allocated_size = malloc_usable_size(allocated);
 
   uptr alloc_beg = (uptr)allocated;
   // If real malloc doesn't return an aligned memory, it's troublesome.
@@ -144,18 +127,17 @@ void *MALLOC(size_t size) {
                kAsanHeapLeftRedzoneMagic);
 
 #ifndef KAFL_FUZZER
-  if (RunInEnclave) {
-    void *callPt = __builtin_return_address(0);
-    if (gEnclaveInfo.isInEnclaveDSORange((uptr)callPt, 1) and
-        MemAccessMgrInited()) {
-      pthread_mutex_lock(&gHeapObjsUpdateMutex);
-      bool successInsert;
-      std::tie(std::ignore, successInsert) = gHeapObjs.emplace(user_beg);
-      if (not successInsert) {
-        abort();
-      }
-      pthread_mutex_unlock(&gHeapObjsUpdateMutex);
+  sgxsan_assert(RunInEnclave);
+  void *callPt = __builtin_return_address(0);
+  sgxsan_assert(gEnclaveInfo.isInEnclaveDSORange((uptr)callPt, 1));
+  if (MemAccessMgrInited()) {
+    pthread_mutex_lock(&gHeapObjsUpdateMutex);
+    bool successInsert;
+    std::tie(std::ignore, successInsert) = gHeapObjs.emplace(user_beg);
+    if (not successInsert) {
+      abort();
     }
+    pthread_mutex_unlock(&gHeapObjsUpdateMutex);
   }
 #endif
 
@@ -166,7 +148,7 @@ extern "C" bool AddrIsInHeapQuarantine(uptr addr) {
   return L1F(*(uint8_t *)MEM_TO_SHADOW(addr)) == kAsanHeapFreeMagic;
 }
 
-void FREE(void *ptr) {
+void sgxsan_free(void *ptr) {
   uptr user_beg, alignment;
   chunk *m;
   QuarantineElement qe;
@@ -218,16 +200,16 @@ void FREE(void *ptr) {
 
 fallback:
   update_heap_usage(ptr, false);
-  BACKEND_FREE(ptr);
+  free(ptr);
 exit:
   return;
 }
 
-void *CALLOC(size_t n_elements, size_t elem_size) {
+void *sgxsan_calloc(size_t n_elements, size_t elem_size) {
   // Since dlsym use calloc, so avoid call updateBackEndHeapAllocator and dlsym
   // in it, and we directly use __libc_calloc as backend calloc
   if (not asan_inited) {
-    return BACKEND_CALLOC(n_elements, elem_size);
+    return calloc(n_elements, elem_size);
   }
 
   size_t req = n_elements * elem_size;
@@ -240,40 +222,40 @@ void *CALLOC(size_t n_elements, size_t elem_size) {
     sgxsan_warning(true, "Multiple Overflow in calloc\n");
     return nullptr;
   }
-  void *mem = MALLOC(req);
+  void *mem = sgxsan_malloc(req);
   if (mem != nullptr) {
     memset(mem, 0, req);
   }
   return mem;
 }
 
-void *REALLOC(void *oldmem, size_t bytes) {
+void *sgxsan_realloc(void *oldmem, size_t bytes) {
   updateBackEndHeapAllocator();
   if (not asan_inited) {
-    return BACKEND_REALLOC(oldmem, bytes);
+    return realloc(oldmem, bytes);
   }
 
   if (oldmem == nullptr) {
-    return MALLOC(bytes);
+    return sgxsan_malloc(bytes);
   }
   chunk *m = (chunk *)((uptr)oldmem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);
   if (bytes == 0) {
-    FREE(oldmem);
+    sgxsan_free(oldmem);
     return nullptr;
   }
 
-  void *mem = MALLOC(bytes);
+  void *mem = sgxsan_malloc(bytes);
 
   if (mem != nullptr) {
     memcpy(mem, oldmem, std::min(m->user_size, bytes));
-    FREE(oldmem);
+    sgxsan_free(oldmem);
   }
 
   return mem;
 }
 
-size_t MALLOC_USABLE_SIZE(void *mem) throw() {
+size_t sgxsan_malloc_usable_size(void *mem) {
   updateBackEndHeapAllocator();
   chunk *m = (chunk *)((uptr)mem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);
@@ -302,7 +284,7 @@ void ClearHeapObject() {
 
     PoisonShadow(user_beg, RoundUpTo(m->user_size, alignment),
                  kAsanHeapLeftRedzoneMagic);
-    BACKEND_FREE((void *)m->alloc_beg);
+    free((void *)m->alloc_beg);
   }
   gHeapObjs.clear();
   pthread_mutex_unlock(&gHeapObjsUpdateMutex);

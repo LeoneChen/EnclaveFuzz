@@ -1,4 +1,5 @@
 #include "Poison.h"
+#include "SGXSanRTApp.h"
 #include <algorithm>
 #include <string.h>
 
@@ -181,63 +182,4 @@ extern "C" void __asan_unregister_globals(SGXSanGlobal *globals, uptr n) {
   // Unpoison the metadata.
   PoisonShadow((uptr)globals, n * sizeof(SGXSanGlobal), kAsanNotPoisonedMagic,
                true);
-}
-
-/// Level 2 Poison
-///
-/// Used to shallow poison sensitive data
-void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value, bool doPoison) {
-  if (UNLIKELY(!IsAligned(addr, SHADOW_GRANULARITY))) {
-    uptr aligned_addr = RoundDownTo(addr, SHADOW_GRANULARITY);
-    size += addr - aligned_addr;
-    addr = aligned_addr;
-  }
-  if (size == 0)
-    return;
-  uint8_t *p_shadow = (uint8_t *)MEM_TO_SHADOW(addr);
-  uptr shadow_size = RoundUpDiv(size, SHADOW_GRANULARITY);
-  if (doPoison) {
-    for (size_t i = 0; i < shadow_size; i++) {
-      p_shadow[i] |= value;
-    }
-  } else {
-    for (size_t i = 0; i < shadow_size; i++) {
-      p_shadow[i] &= ~value;
-    }
-  }
-}
-
-void MoveShallowShadow(uptr dst_addr, uptr src_addr, uptr dst_size,
-                       uptr copy_cnt) {
-  uptr new_dst_addr = RoundUpTo(dst_addr, SHADOW_GRANULARITY);
-  uptr new_src_addr = RoundUpTo(src_addr, SHADOW_GRANULARITY);
-  size_t new_dst_size = dst_size - (new_dst_addr - dst_addr);
-  size_t new_copy_cnt = copy_cnt - (new_src_addr - src_addr);
-
-  size_t processed_size = std::min(new_dst_size, new_copy_cnt);
-  size_t shadowSize = RoundUpDiv(processed_size, SHADOW_GRANULARITY);
-
-  uint8_t *dst_shadow_addr = (uint8_t *)MEM_TO_SHADOW(new_dst_addr);
-  uint8_t *src_shadow_addr = (uint8_t *)MEM_TO_SHADOW(new_src_addr);
-  for (size_t i = 0; i < shadowSize; i++) {
-    dst_shadow_addr[i] = dst_shadow_addr[i] | L2F(src_shadow_addr[i]);
-  }
-}
-
-struct SLSanGlobal {
-  uptr beg;
-  size_t size;
-};
-
-static void RegisterSensitiveGlobal(SLSanGlobal *g) {
-  sgxsan_assert(IsAligned(g->beg, SHADOW_GRANULARITY));
-  ShallowPoisonShadow(g->beg, g->size, kSGXSanSensitiveObjData);
-}
-
-extern "C" void PoisonSensitiveGlobal(SLSanGlobal *globals, size_t n) {
-  for (uptr i = 0; i < n; i++) {
-    RegisterSensitiveGlobal(&globals[i]);
-  }
-  // Poison the metadata. It should not be accessible to user code.
-  PoisonShadow((uptr)globals, n * sizeof(SLSanGlobal), kAsanGlobalRedzoneMagic);
 }

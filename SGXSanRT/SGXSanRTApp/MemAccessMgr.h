@@ -19,15 +19,12 @@ struct FetchInfo {
   bool toCmp = false;
 };
 
-extern "C" __attribute__((weak)) bool DFCmpFuncNameInTOCTOU();
-
 class MemAccessMgr {
 public:
   /* Statistics each ECall */
   // Called before root ECall
   static void init() {
-    sgxsan_assert(m_control_fetchs.empty() and m_out_enclave_access_cnt == 0 and
-                  m_in_enclave_access_cnt == 0 and m_active == false and
+    sgxsan_assert(m_control_fetchs.empty() and m_active == false and
                   m_inited == false);
     m_inited = true;
   }
@@ -35,23 +32,8 @@ public:
   // Called after root ECall return
   static void destroy() {
     sgxsan_assert(m_active == false);
-    log_trace("[Access Count (Out/In)] %lld/%lld\n", m_out_enclave_access_cnt,
-              m_in_enclave_access_cnt);
-    m_out_enclave_access_cnt = 0;
-    m_in_enclave_access_cnt = 0;
     m_control_fetchs.clear();
     m_inited = false;
-  }
-
-  static void add_out_of_enclave_access_cnt() {
-#if (USED_LOG_LEVEL >= 4 /* LOG_LEVEL_TRACE */)
-    if (RunInEnclave) {
-      if (m_active) {
-        sgxsan_assert(m_inited);
-        m_out_of_enclave_access_cnt++;
-      }
-    }
-#endif
   }
 
   static void active() {
@@ -95,12 +77,10 @@ public:
         // if parent function name is not known, assume at same function and
         // only check overlap
         bool at_same_func = true;
-        if (DFCmpFuncNameInTOCTOU and DFCmpFuncNameInTOCTOU()) {
-          if (funcName)
-            at_same_func = strncmp(control_fetch.funcName, funcName,
-                                   std::min((size_t)FUNC_NAME_MAX_LEN,
-                                            strlen(funcName))) == 0;
-        }
+        if (funcName)
+          at_same_func = strncmp(control_fetch.funcName, funcName,
+                                 std::min((size_t)FUNC_NAME_MAX_LEN,
+                                          strlen(funcName))) == 0;
         bool is_overlap =
             RangesOverlap((const char *)control_fetch.addr, control_fetch.size,
                           (const char *)ptr, size);
@@ -113,21 +93,10 @@ public:
     }
   }
 
-  static void add_in_enclave_access_cnt() {
-    if (RunInEnclave) {
-      if (m_active) {
-        sgxsan_assert(m_inited);
-        m_in_enclave_access_cnt++;
-      }
-    }
-  }
-
   static void clear() {
     m_control_fetchs.clear();
     m_active = false;
     m_inited = false;
-    m_out_enclave_access_cnt = 0;
-    m_in_enclave_access_cnt = 0;
   }
   static bool inited() { return m_inited; }
 
@@ -136,8 +105,6 @@ private:
   // used in nested ecall-ocall case
   static __thread bool m_active;
   static __thread bool m_inited;
-  static __thread size_t m_out_enclave_access_cnt;
-  static __thread size_t m_in_enclave_access_cnt;
 };
 
 // Callback of SGXSan

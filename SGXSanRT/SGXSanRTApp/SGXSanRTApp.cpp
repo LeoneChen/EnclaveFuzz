@@ -1,10 +1,7 @@
 #include "SGXSanRTApp.h"
-#include "ArgShadow.h"
-#include "Interceptor.h"
 #include "Malloc.h"
 #include "MemAccessMgr.h"
 #include "Sticker.h"
-#include "plthook.h"
 #include <atomic>
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
@@ -14,7 +11,6 @@
 #include <fstream>
 #include <iostream>
 #include <pthread.h>
-#include <regex>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -23,9 +19,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <unordered_map>
-
-namespace po = boost::program_options;
 
 static const char *log_level_to_prefix[] = {
     "[SGXSan] ALWAYS: ", "[SGXSan] ERROR: ", "[SGXSan] WARNING: ",
@@ -34,10 +27,6 @@ static const char *log_level_to_prefix[] = {
 
 bool asan_inited = false;
 
-std::unordered_map<void * /* callsite addr */,
-                   std::vector<EncryptStatus> /* output type history */>
-    output_history;
-pthread_rwlock_t output_history_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 static struct sigaction g_old_sigact[_NSIG];
 
 extern "C" __attribute__((weak)) bool DFEnableSanCheckDie();
@@ -85,39 +74,6 @@ void NORETURN Die() {
   _Exit(77);
 }
 #endif
-
-// https://maskray.me/blog/2022-04-10-unwinding-through-signal-handler
-extern "C" void sgxsan_signal_safe_dump_bt_buf(uint64_t *bt_buf,
-                                               size_t bt_cnt) {
-  log_always_np("== SGXSan Backtrace BEG ==\n");
-  for (size_t i = 0; i < bt_cnt; i++) {
-    uint64_t addr = bt_buf[i];
-    Dl_info info;
-    if (dladdr((void *)addr, &info) != 0) {
-      if (info.dli_saddr) {
-        log_always_np("0x%016lx: %s (offset 0x%lx) at %s\n",
-                      addr - (uint64_t)info.dli_fbase,
-                      info.dli_sname ? info.dli_sname : "?",
-                      (uint64_t)info.dli_saddr - (uint64_t)info.dli_fbase,
-                      info.dli_fname ? info.dli_fname : "?");
-      } else {
-        log_always_np("0x%016lx: %s at %s\n", addr - (uint64_t)info.dli_fbase,
-                      info.dli_sname ? info.dli_sname : "?",
-                      info.dli_fname ? info.dli_fname : "?");
-      }
-    }
-  }
-  log_always_np("== SGXSan Backtrace END ==\n");
-}
-
-extern "C" void sgxsan_signal_safe_dump_bt() {
-  size_t max_bt_count = 100;
-  uint64_t bt_buf[max_bt_count];
-  size_t bt_cnt =
-      boost::stacktrace::safe_dump_to(bt_buf, sizeof(decltype(bt_buf)));
-
-  sgxsan_signal_safe_dump_bt_buf(bt_buf, bt_cnt);
-}
 
 #ifdef KAFL_FUZZER
 
@@ -189,16 +145,16 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
     log_error("Signal %d\n", siginfo->si_signo);
   }
 
-  sgxsan_signal_safe_dump_bt();
+  sgxsan_backtrace();
   if (FuzzerSignalCB)
     FuzzerSignalCB(signum, siginfo, priv);
   Die();
 }
 #else
 
-extern "C" __attribute__((alias("sgxsan_signal_safe_dump_bt")))
-SANITIZER_INTERFACE_ATTRIBUTE void
-__sanitizer_print_stack_trace();
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_print_stack_trace() {
+  sgxsan_backtrace();
+}
 
 // https://github.com/google/sanitizers/issues/788
 // __sanitizer_acquire_crash_state is important
@@ -259,7 +215,7 @@ static void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
       }
     }
 
-    sgxsan_signal_safe_dump_bt();
+    sgxsan_backtrace();
     Die();
   }
   _Exit(-1);
@@ -327,45 +283,20 @@ static void sgxsan_init_shadow_memory() {
       sgxsan_exec("sysctl vm.mmap_min_addr| tr -s ' '|cut -d \" \" -f3"),
       nullptr, 0);
   if (mmap_min_addr == 0) {
-    mmap((void *)0, page_size, PROT_NONE,
-         MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    sgxsan_error(mmap((void *)0, page_size, PROT_NONE,
+                      MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1,
+                      0) == MAP_FAILED,
+                 "mmap zero address failed");
     sgxsan_error(mprotect((void *)0, page_size, PROT_NONE),
                  "Failed to make 0 address not accessible\n");
   }
 }
-
-#ifndef KAFL_FUZZER
-int hook_enclave() {
-  plthook_t *plthook;
-  std::string fileName = gEnclaveInfo.GetEnclaveFileName();
-  sgxsan_assert(fileName != "");
-  if (plthook_open(&plthook, fileName.c_str()) != 0) {
-    log_error("plthook_open error: %s\n", plthook_error());
-    return -1;
-  }
-
-#define HOOK_SYM(res, plthookStuct, sym)                                       \
-  res = plthook_replace(plthookStuct, #sym, (void *)SGXSAN(sym), NULL);        \
-  if (res != 0 and res != PLTHOOK_FUNCTION_NOT_FOUND) {                        \
-    log_error("plthook_replace error: %s\n", plthook_error());                 \
-    plthook_close(plthookStuct);                                               \
-    return -1;                                                                 \
-  }
-  int result;
-  HOOK_SYM(result, plthook, __sanitizer_cov_8bit_counters_init)
-  HOOK_SYM(result, plthook, __sanitizer_cov_pcs_init)
-#undef HOOK_SYM
-  plthook_close(plthook);
-  return 0;
-}
-#endif
 
 __attribute__((constructor)) void SGXSanInit() {
   if (asan_inited) {
     return;
   }
   updateBackEndHeapAllocator();
-  InitInterceptor();
   // make sure c++ stream is initialized
   std::ios_base::Init _init;
   sgxsan_init_shadow_memory();
@@ -373,24 +304,6 @@ __attribute__((constructor)) void SGXSanInit() {
   asan_inited = true;
 }
 
-/// SLSan Callbacks to show dynamic value flow
-extern "C" void PrintPtr(char *info, void *addr, size_t size) {
-  sgxsan_assert(addr and size);
-  log_trace("%s\n"
-            "Address: 0x%p(0x%lx)\n"
-            "Shadow: 0x%p(0x%lx)\n",
-            info, addr, size, (void *)MEM_TO_SHADOW(addr),
-            RoundUpDiv(size, SHADOW_GRANULARITY));
-}
-
-/// \param func_ptr address of function
-/// \param pos -1 means it's return value of \p func_ptr
-extern "C" void PrintArg(char *info, void *func_ptr, int pos) {
-  log_trace("%s\n"
-            "Function: 0x%p\n"
-            "ArgIdx: %ld\n",
-            info, func_ptr, pos);
-}
 extern "C" __attribute__((weak)) void
 sgxfuzz_log(log_level ll, bool with_prefix, const char *fmt, ...);
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
@@ -430,7 +343,6 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
 void SGXSanLogEnter(const char *str) { log_always("Enter %s\n", str); }
 
 static void PrintShadowMap(log_level ll, uptr addr) {
-  InitInterceptor();
   uptr addr_mask = (~(((uptr)1 << ADDR_SPACE_BITS) - 1));
   sgxsan_assert((addr & addr_mask) == 0);
   uptr shadowAddr = MEM_TO_SHADOW(addr);
@@ -445,11 +357,10 @@ static void PrintShadowMap(log_level ll, uptr addr) {
                     ? shadowAddrRow + 0x50
                     : (kHighShadowEnd + 1);
   char buf[BUFSIZ];
-  REAL(snprintf)(buf, BUFSIZ, "Shadow bytes around the buggy address:\n");
+  snprintf(buf, BUFSIZ, "Shadow bytes around the buggy address:\n");
   std::string str(buf);
   for (uptr i = startRow; i < endRow; i += 0x10) {
-    REAL(snprintf)
-    (buf, BUFSIZ, "%s%p:", i == shadowAddrRow ? "=>" : "  ", (void *)i);
+    snprintf(buf, BUFSIZ, "%s%p:", i == shadowAddrRow ? "=>" : "  ", (void *)i);
     str += buf;
     for (int j = 0; j < 16; j++) {
       std::string prefix = " ", appendix = "";
@@ -462,9 +373,8 @@ static void PrintShadowMap(log_level ll, uptr addr) {
         } else if (j == shadowAddrCol + 1)
           prefix = "]";
       }
-      REAL(snprintf)
-      (buf, BUFSIZ, "%s%02x%s", prefix.c_str(), *(uint8_t *)(i + j),
-       appendix.c_str());
+      snprintf(buf, BUFSIZ, "%s%02x%s", prefix.c_str(), *(uint8_t *)(i + j),
+               appendix.c_str());
       str += buf;
     }
     str += " \n";
@@ -613,101 +523,35 @@ void ReportDoubleFree(uptr pc, uptr bp, uptr sp, uptr addr) {
   return;
 }
 
-std::string addr2line(uptr addr, std::string fileName) {
-  std::stringstream cmd;
-  cmd << "addr2line -afCpe " << fileName.c_str() << " " << std::hex << addr;
-  std::string cmd_str = cmd.str();
-  return sgxsan_exec(cmd_str.c_str());
-}
-
-static std::string _addr2fname(uptr addr, std::string fileName) {
-  std::stringstream cmd;
-  cmd << "addr2line -fCe " << fileName.c_str() << " " << std::hex << addr
-      << " | head -n 1";
-  std::string cmd_str = cmd.str();
-  return sgxsan_exec(cmd_str.c_str());
-}
-
-std::string addr2fname_try(void *addr) {
-  std::string fname = "";
-  Dl_info info;
-  if (dladdr(addr, &info) != 0) {
-    const char *_sname = info.dli_sname;
-    fname = _sname ? std::string(_sname) : "";
-  }
-  return fname;
-}
-
-std::string addr2fname(void *addr) {
-  std::string fname = "";
-  Dl_info info;
-  if (dladdr(addr, &info) != 0) {
-    fname = _addr2fname(
-        (uptr)addr -
-            ((uptr)info.dli_fbase <= 0x400000 ? 0 : (uptr)info.dli_fbase) - 1,
-        info.dli_fname);
-    fname.erase(std::remove(fname.begin(), fname.end(), '\n'), fname.end());
-  }
-  return fname;
-}
-
-bool is_shared_object(const char *fileName) {
-  std::stringstream cmd;
-  cmd << "file $(realpath " << fileName << ")";
-  std::string cmd_str = cmd.str();
-  std::string ret = sgxsan_exec(cmd_str.c_str());
-  return ret.find("shared object") == ret.npos ? false : true;
-}
-
 void sgxsan_dump_bt_buf(void **array, size_t size) {
-  log_always_np("== SGXSan Backtrace BEG ==\n");
+  log_always_np("[*] SGXSan Backtrace:\n");
   Dl_info info;
   for (size_t i = 0; i < size; i++) {
     if (dladdr(array[i], &info) != 0) {
-      std::string str = addr2line(
-          (uptr)array[i] -
-              (!is_shared_object(info.dli_fname) ? 0 : (uptr)info.dli_fbase) -
-              1,
-          info.dli_fname);
-      log_always_np(str.c_str());
+      std::string fname = info.dli_fname, app_name = "TestApp";
+      uptr addr;
+      if (fname.length() >= app_name.length() &&
+          fname.rfind(app_name) == (fname.length() - app_name.length())) {
+        addr = (uptr)array[i];
+      } else {
+        addr = (uptr)array[i] - (uptr)info.dli_fbase;
+      }
+      log_always_np(" \"%s\"+%p", info.dli_fname, (void *)addr);
+    } else {
+      log_always_np(" %p\n", array[i]);
     }
   }
-  log_always_np("== SGXSan Backtrace END ==\n");
 }
 
-extern "C" __attribute__((weak)) bool DFUseAddr2line();
 void sgxsan_backtrace(log_level ll) {
-#if (DUMP_STACK_TRACE)
   if (ll > USED_LOG_LEVEL)
     return;
-  if (DFUseAddr2line and DFUseAddr2line()) {
-    void *array[20];
-    size_t size = backtrace(array, 20);
-    sgxsan_dump_bt_buf(array, size);
-  } else {
-    sgxsan_signal_safe_dump_bt();
-  }
-#endif
-}
 
-void sgxsan_backtrace_boost(log_level ll) {
-#if (DUMP_STACK_TRACE)
-  if (ll > USED_LOG_LEVEL)
-    return;
-  log_always_np("== SGXSan Backtrace BEG ==\n");
-  std::stringstream ss;
-  ss << boost::stacktrace::stacktrace();
-  log_always_np("%s", ss.str().c_str());
-  log_always_np("== SGXSan Backtrace END ==\n");
-#endif
-}
-
-/// Cipher detect
-
-void ClearPlaintextOutputHistory() {
-  pthread_rwlock_wrlock(&output_history_rwlock);
-  output_history.clear();
-  pthread_rwlock_unlock(&output_history_rwlock);
+  size_t max_bt_count = 100;
+  uint64_t bt_buf[max_bt_count];
+  size_t bt_cnt =
+      boost::stacktrace::safe_dump_to(bt_buf, sizeof(decltype(bt_buf)));
+  sgxsan_dump_bt_buf((void **)bt_buf, bt_cnt);
 }
 
 static __thread int TD_init_count = 0;
@@ -716,7 +560,6 @@ extern "C" void TDECallConstructor() {
   if (TD_init_count == 0) {
     // root ecall
     MemAccessMgr::init();
-    ArgShadowStack::init();
   }
   TD_init_count++;
   sgxsan_assert(TD_init_count < 1024);
@@ -726,40 +569,12 @@ extern "C" void TDECallDestructor() {
   if (TD_init_count == 1) {
     // root ecall
     MemAccessMgr::destroy();
-    ArgShadowStack::destroy();
   }
   TD_init_count--;
   sgxsan_assert(TD_init_count >= 0);
 }
 
-void TDECallClear() { TD_init_count = 0; }
-
-void ClearSGXSanRT() {
-  TDECallClear();
-  ClearPlaintextOutputHistory();
-}
-
-enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };
-extern "C" void ReportSensitiveDataLeak(SensitiveDataType srcType,
-                                        uptr srcInfo1, uptr srcInfo2,
-                                        uptr dstAddr, uptr dstSize) {
-  log_warning("Possible leak of sensitive data\n");
-  if (srcType == LoadedData) {
-    uptr srcAddr = srcInfo1;
-    size_t srcSize = srcInfo2;
-    GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, srcAddr, false, srcSize, false,
-                       "Leak of Sensitive Data");
-
-  } else if (srcType == ArgData or srcType == ReturnedData) {
-    sptr argPos = (sptr)srcInfo2;
-    uptr funcAddr = srcInfo1;
-    log_warning("Src info: Arg %ld of func at 0x%lx\n", argPos, funcAddr);
-  } else {
-    abort();
-  }
-  log_warning("Dst info: 0x%lx(0x%lx)\n", dstAddr, dstSize);
-}
+void ClearSGXSanRT() { sgxsan_assert(TD_init_count == 0); }
 
 void ClearStackPoison() {
   std::fstream f("/proc/self/maps", std::ios::in);

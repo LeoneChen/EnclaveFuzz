@@ -1,14 +1,12 @@
 #include "Poison.h"
 #include "SGXSanRTApp.h"
 #include "Sticker.h"
-#include "arch.h"
 #include "rts_cmd.h"
 #include "rts_sim.h"
 #include "sgx_eid.h"
-#include "sgx_error.h"
-#include "sgx_key.h"
 #include "trts_internal_types.h"
 #include <assert.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -46,12 +44,6 @@ extern "C" void __asan_init() {
   static bool gAlreadyAsanInited = false;
   if (gAlreadyAsanInited == false) {
     register_sgxsan_sigaction();
-#ifndef KAFL_FUZZER
-    // We already initialized shadow memory in host ctor
-    if (hook_enclave() != 0) {
-      abort();
-    }
-#endif
     gEnclaveInfo.PoisonEnclaveDSOCode();
     gAlreadyAsanInited = true;
   }
@@ -74,10 +66,32 @@ extern "C" bool check_ecall(ECallCheckType ty, uint32_t targetECallIdx,
   }
 }
 
-#ifndef KAFL_FUZZER
-extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
-extern "C" void TSticker__llvm_profile_write_file() {
-  if (__llvm_profile_write_file)
-    __llvm_profile_write_file();
+extern "C" {
+void *sgxsan_malloc(size_t size);
+void *malloc(size_t size) { return sgxsan_malloc(size); }
+
+void sgxsan_free(void *ptr);
+void free(void *ptr) { sgxsan_free(ptr); }
+
+void *sgxsan_calloc(size_t n_elements, size_t elem_size);
+void *calloc(size_t n_elements, size_t elem_size) {
+  return sgxsan_calloc(n_elements, elem_size);
 }
-#endif
+
+void *sgxsan_realloc(void *oldmem, size_t bytes);
+void *realloc(void *oldmem, size_t bytes) {
+  return sgxsan_realloc(oldmem, bytes);
+}
+
+size_t sgxsan_malloc_usable_size(void *mem);
+size_t malloc_usable_size(void *mem) { return sgxsan_malloc_usable_size(mem); }
+
+int sgxsan_vsnprintf(char *str, size_t size, const char *format, va_list ap);
+int snprintf(char *str, size_t size, const char *format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  int ret = sgxsan_vsnprintf(str, size, format, ap);
+  va_end(ap);
+  return ret;
+}
+}

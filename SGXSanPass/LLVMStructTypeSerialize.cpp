@@ -10,15 +10,8 @@ using namespace llvm;
 
 std::string GetTypeName(const Type *ty) {
   std::string str;
-  if (const StructType *structTy = dyn_cast<StructType>(ty)) {
-    str = structTy->getName();
-  } else {
-    raw_string_ostream ss(str);
-    ty->print(ss, false, true);
-    if (str[0] == '%') {
-      str.erase(0, 1);
-    }
-  }
+  raw_string_ostream ss(str);
+  ty->print(ss, false, true);
   return str;
 }
 
@@ -54,7 +47,11 @@ void Serializer::RecGetTypeJson(ordered_json &json, const Type *ty) {
 }
 
 void Serializer::SerializeStructType(StructType *structTy, ordered_json &json) {
-  auto structName = structTy->getName();
+  auto structName = GetTypeName(structTy);
+  if (StringRef(structName).startswith("\%struct.anon") ||
+      StringRef(structName).startswith("\%union.anon")) {
+    return;
+  }
   for (size_t idx = 0; idx < structTy->getNumElements(); idx++) {
     RecGetTypeJson(json[structName][std::to_string(idx)],
                    structTy->getElementType(idx));

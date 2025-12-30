@@ -42,7 +42,7 @@ typedef signed long sptr;
   uptr pc = (uptr)__builtin_return_address(0);                                 \
   uptr bp = (uptr)__builtin_frame_address(0);                                  \
   uptr local_stack;                                                            \
-  uptr sp = (uptr)&local_stack
+  uptr sp = (uptr) & local_stack
 
 /// mem layout
 #define kLowMemBeg 0
@@ -82,7 +82,6 @@ enum log_level {
 extern "C" {
 #endif
 void register_sgxsan_sigaction();
-int hook_enclave();
 
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
 void SGXSanLogEnter(const char *str);
@@ -112,9 +111,6 @@ struct MallocFreeBTTy {
 extern "C" {
 void sgxsan_dump_bt_buf(void **array, size_t size);
 void sgxsan_backtrace(log_level ll = LOG_LEVEL_ERROR);
-
-void sgxsan_signal_safe_dump_bt();
-void sgxsan_signal_safe_dump_bt_buf(uint64_t *bt_buf, size_t bt_cnt);
 
 void ReportError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                  uptr access_size, const char *msg, ...);
@@ -213,107 +209,6 @@ static inline uptr ExtendInt8(uint8_t _8bit) {
     result = (result << 8) + _8bit;
   }
   return result;
-}
-
-static inline int getArraySum(int *array, int size) {
-  int sum = 0;
-  for (int i = 0; i < size; i++) {
-    sum += array[i];
-  }
-  return sum;
-}
-
-/* addr2line & backtrace Util */
-std::string addr2fname_try(void *addr);
-std::string addr2fname(void *addr);
-
-/// Cipher detect
-enum EncryptStatus { Unknown, Plaintext, Ciphertext };
-
-extern pthread_rwlock_t output_history_rwlock;
-extern std::unordered_map<void * /* callsite addr */,
-                          std::vector<EncryptStatus> /* output type history */>
-    output_history;
-
-static inline int getBucketNum(size_t size) {
-  return size >= 0x800   ? 0x100
-         : size >= 0x100 ? 0x40
-         : size >= 0x10  ? 0x4
-         : size >= 0x2   ? 0x2
-                         : 0x1;
-}
-
-__attribute__((always_inline)) static inline EncryptStatus
-isCiphertext(uint64_t addr, uint64_t size, void *caller_addr) {
-  if (size < 0x100)
-    return Unknown;
-
-  int bucket_num = getBucketNum(size);
-
-  int map[256 /* 2^8 */] = {0};
-
-  // collect byte map
-  for (uint64_t i = 0; i < size; i++) {
-    unsigned char byte = *(unsigned char *)(addr + i);
-    map[byte]++;
-  }
-
-  double CountPerBacket = (int)size / (double)bucket_num;
-  if (size >= 0x100)
-    CountPerBacket = (int)(size - map[0] /* maybe 0-padding in ciphertext */) /
-                     (double)(bucket_num - 1);
-
-  bool is_cipher = true;
-  int step = 0x100 / bucket_num;
-  log_trace("[Cipher Detect] CountPerBacket = %f \n", CountPerBacket);
-
-  for (int i = 0; i < 256; i += step) {
-    int sum = getArraySum(map + i, step);
-    if ((sum > CountPerBacket * 1.5 || sum < CountPerBacket / 2) and
-        (size >= 0x100 ? i != 0 : true)) {
-      is_cipher = false;
-      break;
-    }
-  }
-
-  if (!is_cipher) {
-    std::string fname = addr2fname(caller_addr);
-    log_warning("[%s] Plaintext transfering...\n", fname.c_str());
-  }
-  return is_cipher ? Ciphertext : Plaintext;
-}
-
-__attribute__((always_inline)) static inline void
-check_output_hybrid(uint64_t addr, uint64_t size) {
-  pthread_rwlock_wrlock(&output_history_rwlock);
-
-  // get history of callsite
-  int depth = 2;
-  void *bt_array[depth];
-  if (backtrace(bt_array, depth) != depth)
-    return;
-
-  std::vector<EncryptStatus> &history =
-      output_history[(void *)((uptr)bt_array[depth - 1] - 1)];
-
-  EncryptStatus status = isCiphertext(addr, size, bt_array[depth - 1]);
-  if (history.size() == 0) {
-    history.emplace_back(status);
-  } else {
-    EncryptStatus last_known_status = Unknown;
-    for (auto it = history.rbegin(); it != history.rend(); it++) {
-      if (*it != Unknown) {
-        last_known_status = *it;
-        break;
-      }
-    }
-    history.emplace_back(status);
-
-    sgxsan_warning(last_known_status != Unknown && status != Unknown &&
-                       last_known_status != status,
-                   "Output is plaintext ciphertext hybridization\n");
-  }
-  pthread_rwlock_unlock(&output_history_rwlock);
 }
 
 void ClearSGXSanRT();

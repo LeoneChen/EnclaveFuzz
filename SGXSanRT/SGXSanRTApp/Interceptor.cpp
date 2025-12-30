@@ -1,31 +1,18 @@
-#include "Interceptor.h"
+#include "MemAccessMgr.h"
+#include "PoisonCheck.h"
+#include "SGXSanRTApp.h"
 #include <dlfcn.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 
-DEFINE_REAL(vsnprintf) = nullptr;
-DEFINE_REAL(snprintf) = nullptr;
-
-void InitInterceptor() {
-  static bool HasInit = false;
-  if (HasInit)
-    return;
-  GET_REAL(vsnprintf);
-  GET_REAL(snprintf);
-  HasInit = true;
-}
-
-extern "C" int snprintf(char *__restrict __s, size_t __maxlen,
-                        const char *__restrict __format, ...) {
-  InitInterceptor();
+extern "C" {
+int sgxsan_vsnprintf(char *str, size_t size, const char *format, va_list ap) {
   InOutEnclaveStatus RegionInOutEnclaveStatus;
   uptr RegionPoisonedAddr;
-  RANGE_CHECK(__s, __maxlen, RegionInOutEnclaveStatus, RegionPoisonedAddr,
-              true);
-  va_list ap;
-  va_start(ap, __format);
-  int res = REAL(vsnprintf)(__s, __maxlen, __format, ap);
+  RANGE_CHECK(str, size, RegionInOutEnclaveStatus, RegionPoisonedAddr, true);
+  int res = vsnprintf(str, size, format, ap);
   va_end(ap);
   return res;
+}
 }

@@ -1,30 +1,20 @@
 #include "Sticker.h"
-#include "ArgShadow.h"
-#include "HostASanRT.h"
 #include "Malloc.h"
 #include "MemAccessMgr.h"
 #include "Poison.h"
 #include "SGXSanRTApp.h"
 #include "arch.h"
 #include "cpuid.h"
-#include "plthook.h"
 #include "routine.h"
 #include "rts_cmd.h"
 #include "sgx_edger8r.h"
-#include "sgx_key.h"
-#include "sgx_report.h"
-#include "sgx_thread.h"
 #include "sgx_urts.h"
 #include "trts_internal.h"
 #include <algorithm>
 #include <errno.h>
 #include <filesystem>
-#include <fstream>
 #include <link.h>
-#include <map>
 #include <pthread.h>
-#include <regex>
-#include <set>
 #include <stack>
 #include <thread_data.h>
 #include <unistd.h>
@@ -262,98 +252,6 @@ extern "C" sgx_status_t sgx_create_enclave_ex(
                                  ex_features, ex_features_p);
 }
 
-#ifndef KAFL_FUZZER
-extern "C" __attribute__((weak)) void
-__sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop);
-extern "C" __attribute__((weak)) void
-__sanitizer_cov_8bit_counters_unregister(uint8_t *Start);
-extern "C" __attribute__((weak)) void
-__sanitizer_cov_pcs_init(const uintptr_t *pcs_beg, const uintptr_t *pcs_end);
-extern "C" __attribute__((weak)) void
-__sanitizer_cov_pcs_unregister(const uintptr_t *pcs_beg);
-
-class SanCovMapRepeater {
-
-  struct PCTableEntry {
-    uintptr_t PC, PCFlags;
-  };
-
-public:
-  void RegisterSanCov8Bit(uint8_t *Start, uint8_t *Stop) {
-    if (!__sanitizer_cov_8bit_counters_init or
-        !__sanitizer_cov_8bit_counters_unregister)
-      return;
-    if (m8BitStart2Stop.count(Start) != 0) {
-      // Already registered
-      sgxsan_assert(m8BitStart2Stop[Start] == Stop);
-      return;
-    }
-    m8BitStart2Stop[Start] = Stop;
-    __sanitizer_cov_8bit_counters_init(Start, Stop);
-    if (mShowed8BitCntrs.count(Start) == 0) {
-      log_always("Enclave __sanitizer_cov_8bit_counters_init, %ld inline "
-                 "8-bit counts [%p, %p)\n",
-                 (uptr)Stop - (uptr)Start, Start, Stop);
-      mShowed8BitCntrs.emplace(Start);
-    }
-  }
-
-  void RegisterSanCovPCs(const uintptr_t *pcs_beg, const uintptr_t *pcs_end) {
-    if (!__sanitizer_cov_pcs_init or !__sanitizer_cov_pcs_unregister)
-      return;
-    if (mPCsBeg2End.count(pcs_beg) != 0) {
-      // Already registered
-      sgxsan_assert(mPCsBeg2End[pcs_beg] == pcs_end);
-      return;
-    }
-    mPCsBeg2End[pcs_beg] = pcs_end;
-    __sanitizer_cov_pcs_init(pcs_beg, pcs_end);
-    if (mShowedPCs.count(pcs_beg) == 0) {
-      log_always("Enclave __sanitizer_cov_pcs_init, %ld PCs [%p, %p)\n",
-                 (PCTableEntry *)pcs_end - (PCTableEntry *)pcs_beg, pcs_beg,
-                 pcs_end);
-      mShowedPCs.emplace(pcs_beg);
-    }
-  }
-
-  void UnregisterSanCov8Bit() {
-    if (!__sanitizer_cov_8bit_counters_unregister)
-      return;
-    for (auto &pair : m8BitStart2Stop) {
-      __sanitizer_cov_8bit_counters_unregister(pair.first);
-    }
-    m8BitStart2Stop.clear();
-  }
-
-  void UnregisterSanCovPCs() {
-    if (!__sanitizer_cov_pcs_unregister)
-      return;
-    for (auto &pair : mPCsBeg2End) {
-      __sanitizer_cov_pcs_unregister(pair.first);
-    }
-    mPCsBeg2End.clear();
-  }
-
-private:
-  std::map<uint8_t *, uint8_t *> m8BitStart2Stop;
-  std::map<const uintptr_t *, const uintptr_t *> mPCsBeg2End;
-  std::set<uint8_t *> mShowed8BitCntrs;
-  std::set<const uintptr_t *> mShowedPCs;
-};
-
-SanCovMapRepeater gRepeater;
-
-extern "C" void SGXSAN(__sanitizer_cov_8bit_counters_init)(uint8_t *Start,
-                                                           uint8_t *Stop) {
-  gRepeater.RegisterSanCov8Bit(Start, Stop);
-}
-
-extern "C" void SGXSAN(__sanitizer_cov_pcs_init)(const uintptr_t *pcs_beg,
-                                                 const uintptr_t *pcs_end) {
-  gRepeater.RegisterSanCovPCs(pcs_beg, pcs_end);
-}
-#endif
-
 void ClearSticker() {
   g_enclave_ocall_table = nullptr;
   RunInEnclave = false;
@@ -364,12 +262,8 @@ void ClearSticker() {
 }
 
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
-#ifndef KAFL_FUZZER
-  gRepeater.UnregisterSanCov8Bit();
-  gRepeater.UnregisterSanCovPCs();
-#endif
-
-  // Since we will access object belong to Enclave, so set RunInEnclave to true
+  // Since we will access object belong to Enclave, so set RunInEnclave to
+  // true
   RunInEnclave = true;
   sgxsan_assert(dlclose(gEnclaveInfo.GetHandler()) == 0);
   RunInEnclave = false;
@@ -377,31 +271,11 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   // Clear SGXSanRT's global status belong to Enclave
   ClearSGXSanRT();
   MemAccessMgrClear();
-  ClearArgShadowStack();
   ClearSticker();
-  if (not gHostASanInited) {
-    ClearStackPoison();
-  }
+  ClearStackPoison();
   ClearHeapObject();
   return SGX_SUCCESS;
 }
-
-#ifndef KAFL_FUZZER
-extern "C" __attribute__((weak)) int __llvm_profile_write_file(void);
-void (*TSticker__llvm_profile_write_file)(void);
-extern "C" void libFuzzerCrashCallback() {
-  // Maybe enclave is destoryed
-  if (gEnclaveInfo.GetHandler()) {
-    TSticker__llvm_profile_write_file =
-        (decltype(TSticker__llvm_profile_write_file))dlsym(
-            gEnclaveInfo.GetHandler(), "TSticker__llvm_profile_write_file");
-    if (TSticker__llvm_profile_write_file)
-      TSticker__llvm_profile_write_file();
-  }
-  if (__llvm_profile_write_file)
-    __llvm_profile_write_file();
-}
-#endif
 
 extern "C" void GetEnclaveDSORange(uptr *start, uptr *end) {
   gEnclaveInfo.GetEnclaveDSORange(start, end);

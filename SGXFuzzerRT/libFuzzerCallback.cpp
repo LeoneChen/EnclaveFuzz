@@ -2,7 +2,6 @@
 #include "FuzzDataType.h"
 #include "FuzzedDataProvider.h"
 #include "RandPool.h"
-#include "magic_enum.hpp"
 #include <array>
 #include <assert.h>
 #include <boost/algorithm/string.hpp>
@@ -12,16 +11,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <ostream>
 #include <random>
-#include <setjmp.h>
+#include <sstream>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,7 +30,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -41,14 +39,20 @@ extern "C" {
 }
 #endif
 
+extern "C" void __sanitizer_cov_8bit_counters_init(uint8_t *Start,
+                                                   uint8_t *Stop);
+extern "C" void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
+                                         const uintptr_t *pcs_end);
 #define X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS 47
 #define ADDR_SPACE_BITS X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS
 
-using ordered_json = nlohmann::ordered_json;
 namespace po = boost::program_options;
-namespace fs = std::filesystem;
 
 RandPool gRandPool;
+uint8_t *g_enclave_cntrs = nullptr, *g_real_enclave_cntrs = nullptr;
+uintptr_t *g_enclave_pcs = nullptr, *g_real_enclave_pcs = nullptr;
+unsigned long g_enclave_cntrs_size = 0, g_enclave_pcs_size = 0,
+              g_real_enclave_cntrs_size = 0, g_real_enclave_pcs_size = 0;
 
 sgx_enclave_id_t __hidden_sgxfuzzer_harness_global_eid = 0;
 std::string ClEnclaveFileName;
@@ -56,8 +60,7 @@ size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
 int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
     ClModifyDoubleFetchValueProb, ClZoomRate;
-bool ClEnableSanCheckDie, ClEnableNaiveHarness, ClEnableCollectStack,
-    ClCmpFuncNameInTOCTOU, ClUseAddr2line;
+bool ClEnableSanCheckDie, ClEnableNaiveHarness, ClEnableCollectStack;
 
 // Fuzz sequence
 enum FuzzMode { TEST_RANDOM, TEST_USER };
@@ -132,6 +135,19 @@ void sgxfuzz_log(log_level level, bool with_prefix, const char *format, ...) {
   vfprintf(stderr, format, ap);
   va_end(ap);
 #endif
+}
+
+static std::string exec_shell(const char *cmd) {
+  std::array<char, 128> buffer;
+  std::string result;
+  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+  if (!pipe) {
+    throw std::runtime_error("popen() failed!");
+  }
+  while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+    result += buffer.data();
+  }
+  return result;
 }
 
 #ifndef KAFL_FUZZER
@@ -477,12 +493,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_enable_collect_stack",
           po::value<bool>(&ClEnableCollectStack)->default_value(false),
           "Enable collect stack");
-  add_opt("cb_cmp_func_name_in_toctou",
-          po::value<bool>(&ClCmpFuncNameInTOCTOU)->default_value(false),
-          "Compare function name when checking TOCTOU");
-  add_opt("cb_use_addr2line",
-          po::value<bool>(&ClUseAddr2line)->default_value(false),
-          "Use addr2line to get stack frame info");
 
   po::variables_map vm;
   po::parsed_options parsed = po::command_line_parser(*argc, *argv)
@@ -568,20 +578,57 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   sgxfuzz_assert(ClUsedLogLevel <= 4);
   sgxfuzz_assert(ClMaxCallSeqSize >= 1);
   sgxfuzz_assert(ClZoomRate > 0 and ClZoomRate < 50);
+
+  std::string cmd1 =
+      "size -A " + ClEnclaveFileName + "|grep __sancov_cntrs|awk '{print $2}'";
+  auto sancov_cntrs_size_str = exec_shell(cmd1.c_str());
+  if (!sancov_cntrs_size_str.empty()) {
+    g_enclave_cntrs_size = std::stoul(sancov_cntrs_size_str);
+    if (g_enclave_cntrs_size) {
+      g_enclave_cntrs = (uint8_t *)calloc(g_enclave_cntrs_size, 1);
+      __sanitizer_cov_8bit_counters_init(
+          g_enclave_cntrs, g_enclave_cntrs + g_enclave_cntrs_size);
+    }
+  }
+  std::string cmd2 =
+      "size -A " + ClEnclaveFileName + "|grep __sancov_pcs|awk '{print $2}'";
+  auto sancov_pcs_size_str = exec_shell(cmd2.c_str());
+  if (!sancov_pcs_size_str.empty()) {
+    g_enclave_pcs_size = std::stoul(sancov_pcs_size_str) / 16;
+    sgxfuzz_assert(g_enclave_pcs_size = g_enclave_cntrs_size);
+    if (g_enclave_pcs_size) {
+      g_enclave_pcs = (uintptr_t *)calloc(g_enclave_pcs_size, 16);
+      __sanitizer_cov_pcs_init(g_enclave_pcs,
+                               g_enclave_pcs + g_enclave_pcs_size * 2);
+    }
+  }
   return 0;
 }
 
 #ifndef KAFL_FUZZER
+extern "C" void sgxfuzz__sanitizer_cov_8bit_counters_init(uint8_t *Start,
+                                                          uint8_t *Stop) {
+  if (g_real_enclave_cntrs == 0) {
+    g_real_enclave_cntrs = Start;
+    g_real_enclave_cntrs_size = Stop - Start;
+  } else {
+    sgxfuzz_assert(g_real_enclave_cntrs == Start);
+  }
+}
+
+extern "C" void sgxfuzz__sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
+                                                const uintptr_t *pcs_end) {
+  if (g_real_enclave_pcs == 0) {
+    g_real_enclave_pcs = (uintptr_t *)pcs_beg;
+    g_real_enclave_pcs_size = (pcs_end - pcs_beg) / 2;
+  } else {
+    sgxfuzz_assert(g_real_enclave_pcs == pcs_beg);
+  }
+}
+
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
                                           size_t MaxSize, unsigned int Seed) {
   return data_factory.mutate(Data, Size, MaxSize);
-}
-
-extern "C" void LLVMFuzzerEarlyAfterRunOne() {
-  // Destroy Enclave
-  sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
-                    SGX_SUCCESS,
-                "[FAIL] Enclave destroy");
 }
 
 extern "C" __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
@@ -641,12 +688,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 #endif
   data_factory.clear();
 
-#ifdef KAFL_FUZZER
+#ifndef KAFL_FUZZER
+  sgxfuzz_assert(g_enclave_cntrs_size = g_real_enclave_cntrs_size);
+  memcpy(g_enclave_cntrs, g_real_enclave_cntrs, g_real_enclave_cntrs_size);
+  sgxfuzz_assert(g_enclave_pcs_size = g_real_enclave_pcs_size);
+  memcpy(g_enclave_pcs, g_real_enclave_pcs, g_real_enclave_pcs_size * 16);
+  g_real_enclave_cntrs = 0;
+  g_real_enclave_pcs = 0;
+#endif
   // Destroy Enclave
   sgxfuzz_error(sgx_destroy_enclave(__hidden_sgxfuzzer_harness_global_eid) !=
                     SGX_SUCCESS,
                 "[FAIL] Enclave destroy");
-#endif
   return 0;
 }
 
@@ -707,8 +760,6 @@ extern "C" bool DFEnableSanCheckDie() {
 }
 
 extern "C" bool DFEnableCollectStack() { return ClEnableCollectStack; }
-extern "C" bool DFCmpFuncNameInTOCTOU() { return ClCmpFuncNameInTOCTOU; }
-extern "C" bool DFUseAddr2line() { return ClUseAddr2line; }
 
 #ifdef KAFL_FUZZER
 extern "C" void FuzzerCrashCB() { kAFL_hypercall(HYPERCALL_KAFL_PANIC, 1); }

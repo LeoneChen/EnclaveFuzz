@@ -32,8 +32,6 @@ install(TARGETS
         SGXSanRTEnclave
         SGXFuzzerPass
         SGXFuzzerRT
-        FuncRenamePass
-        GetOCallTable
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
 
