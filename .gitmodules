@@ -73,3 +73,6 @@
 [submodule "SGX_APP/TaLoS"]
 	path = SGX_APP/TaLoS
 	url = git@github.com:LeoneChen/libressl-2.4.1.git
+[submodule "orig_app/wasm-micro-runtime"]
+	path = orig_app/wasm-micro-runtime
+	url = git@github.com:LeoneChen/wasm-micro-runtime.git
