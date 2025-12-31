@@ -39,10 +39,16 @@ extern "C" {
 }
 #endif
 
-extern "C" void __sanitizer_cov_8bit_counters_init(uint8_t *Start,
-                                                   uint8_t *Stop);
-extern "C" void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
-                                         const uintptr_t *pcs_end);
+extern "C" {
+
+void *sgxsan_malloc(size_t size);
+void sgxsan_free(void *ptr);
+void *sgxsan_calloc(size_t n_elements, size_t elem_size);
+
+void __sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop);
+void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
+                              const uintptr_t *pcs_end);
+}
 #define X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS 47
 #define ADDR_SPACE_BITS X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS
 
@@ -59,7 +65,7 @@ std::string ClEnclaveFileName;
 size_t ClMaxStrlen, ClMaxCount, ClMaxSize, ClMaxCallSeqSize, ClMaxPayloadSize;
 int ClUsedLogLevel = 2; /* may log before ClUsedLogLevel is initialized */
 double ClProvideNullPointerProb, ClReturn0Prob, ClModifyOCallRetProb,
-    ClModifyDoubleFetchValueProb, ClZoomRate;
+    ClZoomRate;
 bool ClEnableSanCheckDie, ClEnableNaiveHarness, ClEnableCollectStack;
 
 // Fuzz sequence
@@ -273,7 +279,8 @@ public:
 
   size_t getUserCheckCount(size_t eleSize) {
     sgxfuzz_assert(eleSize);
-    size_t res = getIntergerInRange<size_t>(1, ClMaxCount);
+    size_t res = getIntergerInRange<size_t>(eleSize < 8 ? (20 / eleSize) : 1,
+                                            ClMaxCount);
     res = zoom(res, ClMaxCount, ClZoomRate, 1.0);
     return res;
   }
@@ -350,7 +357,7 @@ public:
         // It may be freed by ECall
         continue;
       }
-      free(memArea);
+      sgxsan_free(memArea);
     }
     allocatedMemAreas.clear();
   }
@@ -358,7 +365,7 @@ public:
   void *managedMalloc(size_t size) {
     if (size == 0)
       return nullptr;
-    void *ptr = malloc(size);
+    void *ptr = sgxsan_malloc(size);
     sgxfuzz_assert(ptr != nullptr);
     // log_debug("malloc %p(%d)\n", ptr, size);
     allocatedMemAreas.push_back((uint8_t *)ptr);
@@ -368,7 +375,7 @@ public:
   void *managedCalloc(size_t count, size_t size) {
     if (count * size == 0)
       return nullptr;
-    void *ptr = calloc(count, size);
+    void *ptr = sgxsan_calloc(count, size);
     sgxfuzz_assert(ptr != nullptr);
     // log_debug("calloc %p(%d * %d)\n", ptr, count, size);
     allocatedMemAreas.push_back((uint8_t *)ptr);
@@ -405,10 +412,6 @@ public:
     return prob < ClModifyOCallRetProb;
   }
 
-  bool EnableModifyDoubleFetchValue() {
-    double prob = getProbability<double>();
-    return prob < ClModifyDoubleFetchValueProb;
-  }
   size_t GetExpectedFuzzDataSize() { return mExpectedFuzzDataSize; }
 
   bool EnableSanCheckDie() { return ClEnableSanCheckDie; }
@@ -475,9 +478,6 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
   add_opt("cb_modify_ocall_ret_prob",
           po::value<double>(&ClModifyOCallRetProb)->default_value(0.5),
           "Probability to modify OCall return");
-  add_opt("cb_modify_double_fetch_value_prob",
-          po::value<double>(&ClModifyDoubleFetchValueProb)->default_value(0.5),
-          "Probability to modify value when detect double fetch");
   add_opt("cb_zoom_rate", po::value<double>(&ClZoomRate)->default_value(1),
           "Give more or less probability to small count than big count, "
           "rate > 1 => zoom out, 0 < rate < 1 => zoom in");
@@ -708,11 +708,6 @@ extern "C" size_t DFGetUserCheckCount(size_t eleSize, char *cStrAsParamID) {
   return data_factory.getUserCheckCount(eleSize);
 }
 
-extern "C" uint8_t *DFGetBytesEx(uint8_t *ptr, size_t byteArrLen,
-                                 char *cStrAsParamID, FuzzDataTy dataType) {
-  return data_factory.getBytes(ptr, byteArrLen, dataType);
-}
-
 extern "C" uint8_t *DFGetBytes(uint8_t *ptr, size_t byteArrLen,
                                char *cStrAsParamID, FuzzDataTy dataType) {
   return data_factory.getBytes(ptr, byteArrLen, dataType);
@@ -747,10 +742,6 @@ extern "C" uint64_t DFGetPtToCntOCall(uint64_t size, uint64_t count,
 
 extern "C" bool DFEnableModifyOCallRet(char *cParamID) {
   return data_factory.EnableModifyOCallRet(cParamID);
-}
-
-extern "C" bool DFEnableModifyDoubleFetchValue() {
-  return data_factory.EnableModifyDoubleFetchValue();
 }
 
 extern "C" int DFGetInt32() { return data_factory.getInterger<int>(); }

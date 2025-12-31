@@ -127,17 +127,18 @@ void *sgxsan_malloc(size_t size) {
                kAsanHeapLeftRedzoneMagic);
 
 #ifndef KAFL_FUZZER
-  sgxsan_assert(RunInEnclave);
-  void *callPt = __builtin_return_address(0);
-  sgxsan_assert(gEnclaveInfo.isInEnclaveDSORange((uptr)callPt, 1));
-  if (MemAccessMgrInited()) {
-    pthread_mutex_lock(&gHeapObjsUpdateMutex);
-    bool successInsert;
-    std::tie(std::ignore, successInsert) = gHeapObjs.emplace(user_beg);
-    if (not successInsert) {
-      abort();
+  if (RunInEnclave) {
+    void *callPt = __builtin_return_address(0);
+    if (gEnclaveInfo.isInEnclaveDSORange((uptr)callPt, 1) and
+        MemAccessMgrInited()) {
+      pthread_mutex_lock(&gHeapObjsUpdateMutex);
+      bool successInsert;
+      std::tie(std::ignore, successInsert) = gHeapObjs.emplace(user_beg);
+      if (not successInsert) {
+        abort();
+      }
+      pthread_mutex_unlock(&gHeapObjsUpdateMutex);
     }
-    pthread_mutex_unlock(&gHeapObjsUpdateMutex);
   }
 #endif
 
