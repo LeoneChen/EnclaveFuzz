@@ -20,7 +20,6 @@ message(STATUS "Found LLVM_DIR: ${LLVM_DIR} -> ${LLVM_INSTALL_PREFIX}")
 
 add_subdirectory(SGXSanPass)
 add_subdirectory(SGXSanRT)
-add_subdirectory(SGXFuzzerPass)
 add_subdirectory(SGXFuzzerRT)
 if(KAFL_FUZZER)
     add_subdirectory(kAFLUSpaceUtil)
@@ -30,7 +29,6 @@ install(TARGETS
         SGXSanPass
         SGXSanRTApp
         SGXSanRTEnclave
-        SGXFuzzerPass
         SGXFuzzerRT
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
