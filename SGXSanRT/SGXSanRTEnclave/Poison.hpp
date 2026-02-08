@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanRTCom.h"
+#include "SGXSanRTEnclave.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <stddef.h>
@@ -22,15 +22,6 @@ const int kAsanArrayCookieMagic = 0xac;
 const int kAsanIntraObjectRedzone = 0xbb;
 const int kAsanAllocaLeftMagic = 0xca;
 const int kAsanAllocaRightMagic = 0xcb;
-// Mark sensitive area
-const int kSGXSanSensitiveLayout = 0x10;
-const int kSGXSanSensitiveObjData = 0x20;
-
-/* Level 1 Poison - Reflect whether memory is valid to access or not */
-#define kL1Filter 0x8F
-#define kL1Mask ((uint8_t)(~kL1Filter))
-#define L1F(ShadowValue) (ShadowValue & kL1Filter)
-#define L1M(ShadowValue) (ShadowValue & kL1Mask)
 
 static inline void FastPoisonShadow(uptr alignedAddr, size_t alignedSize,
                                     uint8_t value) {
@@ -78,7 +69,7 @@ static inline void PoisonShadow(uptr addr, size_t size, uint8_t value) {
 
   if (remained) {
     uint8_t *shadowEnd = (uint8_t *)MEM_TO_SHADOW(addr + size - remained);
-    int8_t origValue = L1F(*shadowEnd);
+    int8_t origValue = *shadowEnd;
     if (value >= 0x80) {
       // If possible, mark all the bytes mapping to last shadow byte as
       // unaddressable.
@@ -114,24 +105,7 @@ static inline void UnPoisonShadow(uptr addr, size_t size) {
 
   if (remained) {
     uint8_t *shadowEnd = (uint8_t *)MEM_TO_SHADOW(addr + size - remained);
-    int8_t origValue = L1F(*shadowEnd);
+    int8_t origValue = *shadowEnd;
     *shadowEnd = origValue == 0 ? 0 : std::max(origValue, (int8_t)remained);
   }
 }
-
-/* Level 2 Poison - Reflect extra information */
-#define kL2Filter 0x30
-#define kL2Mask ((uint8_t)(~kL2Filter))
-#define L2F(ShadowValue) (ShadowValue & kL2Filter)
-#define L2M(ShadowValue) (ShadowValue & kL2Mask)
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-void ShallowPoisonShadow(uptr addr, uptr size, uint8_t value);
-void ShallowUnPoisonShadow(uptr addr, uptr size);
-void sgxsan_shallow_shadow_copy_on_mem_transfer(uptr dst_addr, uptr src_addr,
-                                                uptr dst_size, uptr copy_cnt);
-#ifdef __cplusplus
-}
-#endif

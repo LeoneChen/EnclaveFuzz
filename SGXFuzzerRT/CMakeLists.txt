@@ -1,61 +1,42 @@
+set(LIBFUZZER_DIR ../third_party/llvm-project/compiler-rt/lib/fuzzer/)
 set(LIBFUZZER_SRC
-    libFuzzer/FuzzerCrossOver.cpp
-    libFuzzer/FuzzerDataFlowTrace.cpp
-    libFuzzer/FuzzerDriver.cpp
-    libFuzzer/FuzzerExtFunctionsDlsym.cpp
-    libFuzzer/FuzzerExtFunctionsWeak.cpp
-    libFuzzer/FuzzerExtFunctionsWindows.cpp
-    libFuzzer/FuzzerExtraCounters.cpp
-    libFuzzer/FuzzerFork.cpp
-    libFuzzer/FuzzerInterceptors.cpp
-    libFuzzer/FuzzerIO.cpp
-    libFuzzer/FuzzerIOPosix.cpp
-    libFuzzer/FuzzerIOWindows.cpp
-    libFuzzer/FuzzerLoop.cpp
-    libFuzzer/FuzzerMain.cpp
-    libFuzzer/FuzzerMerge.cpp
-    libFuzzer/FuzzerMutate.cpp
-    libFuzzer/FuzzerSHA1.cpp
-    libFuzzer/FuzzerTracePC.cpp
-    libFuzzer/FuzzerUtil.cpp
-    libFuzzer/FuzzerUtilDarwin.cpp
-    libFuzzer/FuzzerUtilFuchsia.cpp
-    libFuzzer/FuzzerUtilLinux.cpp
-    libFuzzer/FuzzerUtilPosix.cpp
-    libFuzzer/FuzzerUtilWindows.cpp)
+    ${LIBFUZZER_DIR}/FuzzerCrossOver.cpp
+    ${LIBFUZZER_DIR}/FuzzerDataFlowTrace.cpp
+    ${LIBFUZZER_DIR}/FuzzerDriver.cpp
+    ${LIBFUZZER_DIR}/FuzzerExtFunctionsDlsym.cpp
+    ${LIBFUZZER_DIR}/FuzzerExtFunctionsWeak.cpp
+    ${LIBFUZZER_DIR}/FuzzerExtFunctionsWindows.cpp
+    ${LIBFUZZER_DIR}/FuzzerExtraCounters.cpp
+    ${LIBFUZZER_DIR}/FuzzerFork.cpp
+    ${LIBFUZZER_DIR}/FuzzerInterceptors.cpp
+    ${LIBFUZZER_DIR}/FuzzerIO.cpp
+    ${LIBFUZZER_DIR}/FuzzerIOPosix.cpp
+    ${LIBFUZZER_DIR}/FuzzerIOWindows.cpp
+    ${LIBFUZZER_DIR}/FuzzerLoop.cpp
+    ${LIBFUZZER_DIR}/FuzzerMain.cpp
+    ${LIBFUZZER_DIR}/FuzzerMerge.cpp
+    ${LIBFUZZER_DIR}/FuzzerMutate.cpp
+    ${LIBFUZZER_DIR}/FuzzerSHA1.cpp
+    ${LIBFUZZER_DIR}/FuzzerTracePC.cpp
+    ${LIBFUZZER_DIR}/FuzzerUtil.cpp
+    ${LIBFUZZER_DIR}/FuzzerUtilDarwin.cpp
+    ${LIBFUZZER_DIR}/FuzzerUtilFuchsia.cpp
+    ${LIBFUZZER_DIR}/FuzzerUtilLinux.cpp
+    ${LIBFUZZER_DIR}/FuzzerUtilPosix.cpp
+    ${LIBFUZZER_DIR}/FuzzerUtilWindows.cpp)
 
 set(FUZZER_RT_SRC
     libFuzzerCallback.cpp)
 
-if(HOST_ASAN)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
-    message(STATUS "HOST_ASAN Enabled")
-endif()
-
 include_directories(
-    libFuzzer
-    ../json/single_include
-    ../magic_enum/include
-    ${CMAKE_CURRENT_BINARY_DIR}/..
-    ${LINUX_SGX_SRC_DIR}/common/inc
+    ${LIBFUZZER_DIR}
+    ${SGXSDK_DIR}/common/inc
     ${LLVM_INSTALL_PREFIX}/lib/clang/13.0.1/include/fuzzer)
 
-if(KAFL_FUZZER)
-include_directories(
-    ${KAFL_EXAMPLES_DIR}/linux-user/libnyx_agent/src/
-    ${KAFL_EXAMPLES_DIR}
-)
-add_library(
-    SGXFuzzerRT STATIC 
-    ${FUZZER_RT_SRC})
-target_compile_definitions(SGXFuzzerRT PUBLIC KAFL_FUZZER)
-else()
 add_library(
     SGXFuzzerRT STATIC 
     ${LIBFUZZER_SRC}
     ${FUZZER_RT_SRC})
-endif()
 
 set_target_properties(
     SGXFuzzerRT PROPERTIES

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanRTCom.h"
+#include "SGXSanRTConfig.h"
 #include <stddef.h>
 
 // use our malloc series (which use dlmalloc as backend), and override original
@@ -31,7 +31,7 @@ static inline uptr ComputeRZLog(uptr user_requested_size) {
 }
 
 static inline u32 RZLog2Size(u32 rz_log) {
-  CHECK_LT(rz_log, 8);
+  sgxsan_assert(rz_log < 8);
   return 16 << rz_log;
 }
 

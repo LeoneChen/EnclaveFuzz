@@ -1,54 +1,16 @@
-#include "StackTrace.hpp"
-#include "SGXSanRTCom.h"
+#include "SGXSanRTConfig.h"
 #include "SGXSanRTTBridge.hpp"
 #include "trts_util.h"
 #define UNW_LOCAL_ONLY
 #include "libunwind_i.h"
 #include <cstdlib>
 #include <sgx_trts.h>
-
-// level == 0 means return address of function that called
-// 'get_ret_addrs_in_stack'
-void get_ret_addrs_in_stack(std::vector<uint64_t> &ret_addrs,
-                            uint64_t enclave_base_addr, unsigned int level,
-                            size_t max_collect_count, uint64_t bp) {
-  if (bp == 0)
-    bp = (uint64_t)__builtin_frame_address(0);
-  uint64_t ret_addr = *(uint64_t *)(bp + 8);
-  for (unsigned int i = 0; i < max_collect_count + level; i++) {
-    if (i >= level) {
-      ret_addrs.emplace_back(ret_addr - enclave_base_addr);
-    }
-    bp = *(uint64_t *)bp;
-    if (not is_stack_addr((void *)bp, sizeof(uintptr_t)))
-      break;
-    ret_addr = *(uint64_t *)(bp + 8);
-    if (!sgx_is_within_enclave((void *)ret_addr, 1))
-      break;
-  }
-}
-
-void sgxsan_backtrace(log_level ll) {
-#if (DUMP_STACK_TRACE)
-  std::vector<uint64_t> ret_addrs, offset_ret_addrs;
-  libunwind_backtrace(ret_addrs);
-  for (auto ret_addr : ret_addrs) {
-    offset_ret_addrs.push_back(ret_addr - g_enclave_base);
-  }
-  size_t ret_addr_arr_size = ret_addrs.size();
-  if (ret_addr_arr_size > 0) {
-    sgxsan_log(ll, false, "============= Stack Trace Begin ==============\n");
-    sgxsan_ocall_addr2line(offset_ret_addrs.data(), ret_addr_arr_size, ll);
-    sgxsan_log(ll, false, "============== Stack Trace End ===============\n");
-  }
-#else
-  (void)ll;
-#endif
-}
+#include <stdint.h>
+#include <vector>
 
 // https://eli.thegreenplace.net/2015/programmatic-access-to-the-call-stack-in-c/
 void libunwind_backtrace(std::vector<uint64_t> &ret_addrs,
-                         size_t max_collect_count) {
+                         size_t max_collect_count = 0) {
   unw_context_t context;
   if (unw_getcontext(&context) != 0)
     return;
@@ -77,5 +39,18 @@ void libunwind_backtrace(std::vector<uint64_t> &ret_addrs,
     if (not sgx_is_within_enclave(
             (const void *)((struct cursor *)&cursor)->dwarf.ip, 4096))
       break;
+  }
+}
+
+void sgxsan_backtrace(log_level ll) {
+  std::vector<uint64_t> ret_addrs, offset_ret_addrs;
+  libunwind_backtrace(ret_addrs);
+  for (auto ret_addr : ret_addrs) {
+    offset_ret_addrs.push_back(ret_addr - g_enclave_base);
+  }
+  size_t ret_addr_arr_size = ret_addrs.size();
+  if (ret_addr_arr_size > 0) {
+    sgxsan_log(ll, false, "============= Stack Trace Begin ==============\n");
+    sgxsan_ocall_addr2line(offset_ret_addrs.data(), ret_addr_arr_size, ll);
   }
 }

@@ -1,14 +1,10 @@
 
 #include "Malloc.hpp"
 #include "ErrorReport.hpp"
-#include "InternalDlmalloc.hpp"
 #include "Poison.hpp"
-#include "PoisonCheck.hpp"
 #include "Quarantine.hpp"
 #include "SGXSanRTEnclave.hpp"
-#include "StackTrace.hpp"
 #include <pthread.h>
-#include <unordered_set>
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
@@ -17,6 +13,7 @@ size_t global_heap_usage = 0;
 #define MAX_SIZE_T (~(size_t)0)
 
 struct chunk {
+  size_t magic; // ensure queried user_beg is correct
   uptr alloc_beg;
   size_t user_size;
 };
@@ -51,10 +48,6 @@ void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *),
 }
 
 void *MALLOC(size_t size) {
-  if (size == 0) {
-    sgxsan_warning(size == 0, "Malloc 0 size\n");
-  }
-
   if (not asan_inited) {
     auto p = BACKEND_MALLOC(size);
     update_heap_usage(p, BACKEND_MALLOC_USABLE_SZIE);
@@ -89,13 +82,14 @@ void *MALLOC(size_t size) {
   if (!IsAligned(user_beg, alignment))
     user_beg = RoundUpTo(user_beg, alignment);
   uptr user_end = user_beg + size;
-  CHECK_LE(user_end, alloc_end);
+  sgxsan_assert(user_end <= alloc_end);
 
   // place the chunk in left redzone
   uptr chunk_beg = user_beg - sizeof(chunk);
   chunk *m = reinterpret_cast<chunk *>(chunk_beg);
 
   // if alloc_beg is not aligned, we cannot automatically calculate it
+  m->magic = 0xDEADBEEF;
   m->alloc_beg = alloc_beg;
   m->user_size = size;
   log_trace("\n");
@@ -128,10 +122,11 @@ void FREE(void *ptr) {
     ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
   }
   uptr alignment = SHADOW_GRANULARITY;
-  CHECK(IsAligned(user_beg, alignment));
+  sgxsan_assert(IsAligned(user_beg, alignment));
 
   uptr chunk_beg = user_beg - sizeof(chunk);
   chunk *m = reinterpret_cast<chunk *>(chunk_beg);
+  sgxsan_assert(m->magic == 0xDEADBEEF);
   size_t user_size = m->user_size;
   log_trace("\n");
   log_trace("[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg,

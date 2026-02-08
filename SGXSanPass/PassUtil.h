@@ -1,7 +1,5 @@
 #pragma once
 
-#include "LLVMStructTypeSerialize.h"
-#include "nlohmann/json.hpp"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
@@ -14,26 +12,6 @@
 #include <unordered_map>
 
 namespace llvm {
-static inline Value *stripCast(Value *val) {
-  while (CastInst *castI = dyn_cast<CastInst>(val)) {
-    val = castI->getOperand(0);
-  }
-  return val;
-}
-
-static inline SmallVector<Value *> getValuesByStrInFunction(Function *F,
-                                                            std::string str) {
-  SmallVector<Value *> valueVec;
-  for (auto &BB : *F) {
-    for (auto &inst : BB) {
-      Value *value = cast<Value>(&inst);
-      if (value->getName().str() == str) {
-        valueVec.emplace_back(value);
-      }
-    }
-  }
-  return valueVec;
-}
 
 static inline Function *getCalledFunctionStripPointerCast(CallInst *CallI) {
   if (Function *callee = CallI->getCalledFunction()) {
@@ -55,26 +33,6 @@ static inline StringRef getDirectCalleeName(Value *value) {
   return "";
 }
 
-static inline StringRef getParentFuncName(Value *value) {
-  if (auto I = dyn_cast<Instruction>(value)) {
-    return I->getFunction()->getName();
-  } else if (Argument *arg = dyn_cast<Argument>(value)) {
-    return arg->getParent()->getName();
-  }
-  return "";
-}
-
-static inline std::string toString(Value *val) {
-  std::string str;
-  raw_string_ostream str_ostream(str);
-  val->print(str_ostream, true);
-  std::stringstream ss;
-  ss << "[Func] " << getParentFuncName(val).str() << " [Name] "
-     << val->getName().str() << "\n"
-     << str;
-  return ss.str();
-}
-
 static inline SmallVector<User *> getNonCastUsers(Value *value) {
   SmallVector<User *> users;
   for (User *user : value->users()) {
@@ -93,19 +51,6 @@ static inline bool hasCmpUser(Value *val) {
     if (I && (I->getOpcode() == Instruction::ICmp ||
               I->getOpcode() == Instruction::FCmp)) {
       return true;
-    }
-  }
-  return false;
-}
-
-static inline bool usedAsFunction(Value *val) {
-  if (val->getType()->isFunctionTy())
-    return true;
-  for (auto user : getNonCastUsers(val)) {
-    if (CallInst *CI = dyn_cast<CallInst>(user)) {
-      if (stripCast(CI->getCalledOperand()) == val) {
-        return true;
-      }
     }
   }
   return false;
@@ -203,18 +148,3 @@ private:
 };
 
 } // namespace llvm
-
-void dump(nlohmann::ordered_json json);
-void dump(nlohmann::ordered_json json,
-          nlohmann::ordered_json::json_pointer ptr);
-
-void dump(nlohmann::json json);
-void dump(nlohmann::json json, nlohmann::json::json_pointer ptr);
-
-void dump(llvm::Value *val);
-
-std::vector<std::string> GetFileNames(std::filesystem::path dir,
-                                      std::string substr);
-std::vector<std::string> RecGetFilePaths(std::filesystem::path dir,
-                                         std::string substr);
-std::string ReadFile(std::string fileName);

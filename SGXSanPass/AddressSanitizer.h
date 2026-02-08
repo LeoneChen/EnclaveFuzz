@@ -1,7 +1,6 @@
 #pragma once
 
 #include "PassUtil.h"
-#include "nlohmann/json.hpp"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/IR/IRBuilder.h"

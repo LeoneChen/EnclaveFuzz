@@ -1,7 +1,6 @@
 #include "SGXSanRTEnclave.hpp"
-#include "SGXLayoutPoisoner.hpp"
+#include "Poison.hpp"
 #include "SGXSanRTTBridge.hpp"
-#include "StackTrace.hpp"
 #include "trts_util.h"
 #include <assert.h>
 #include <pthread.h>
@@ -9,9 +8,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-// Used by SanCov Pass for Enclave
-uint8_t *__SGXSanCovMap;
 
 static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -25,28 +21,10 @@ int sgxsan_exception_handler(sgx_exception_info_t *info) {
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
-/* SGXLayoutPoisoner */
-SGXLayoutPoisoner gSGXLayoutPoisoner;
-
-const char *layout_id_str[] = {"Undefined",     "HEAP_MIN",
-                               "HEAP_INIT",     "HEAP_MAX",
-                               "TCS",           "TD",
-                               "SSA",           "STACK_MAX",
-                               "STACK_MIN",     "THREAD_GROUP",
-                               "GUARD",         "HEAP_DYN_MIN",
-                               "HEAP_DYN_INIT", "HEAP_DYN_MAX",
-                               "TCS_DYN",       "TD_DYN",
-                               "SSA_DYN",       "STACK_DYN_MAX",
-                               "STACK_DYN_MIN", "THREAD_GROUP_DYN",
-                               "RSRV_MIN",      "RSRV_INIT",
-                               "RSRV_MAX"};
-
 /* Initialize */
 static void init_shadow_memory_out_enclave() {
-  sgxsan_error(SGX_SUCCESS != sgxsan_ocall_init_shadow_memory(g_enclave_base,
-                                                              g_enclave_size,
-                                                              &__SGXSanCovMap),
-               "sgxsan_ocall_init_shadow_memory failed");
+  sgxsan_assert(SGX_SUCCESS == sgxsan_ocall_init_shadow_memory(g_enclave_base,
+                                                               g_enclave_size));
   // Poison shadow map of Enclave heap
   uptr enclaveHeapBase = (uptr)get_heap_base();
   size_t enclaveHeapSize = get_heap_size();
@@ -63,11 +41,8 @@ static void AsanInitInternal() {
 
   asan_inited = 1;
 
-  sgxsan_error(sgx_register_exception_handler(1, sgxsan_exception_handler) ==
-                   nullptr,
-               "sgx_register_exception_handler failed");
-  gSGXLayoutPoisoner = SGXLayoutPoisoner();
-  gSGXLayoutPoisoner.poison_senitive_layout();
+  sgxsan_assert(sgx_register_exception_handler(1, sgxsan_exception_handler) !=
+                nullptr);
 }
 
 void AsanInitFromRtl() {
@@ -79,10 +54,4 @@ void AsanInitFromRtl() {
 void __asan_init() {
   // sgxsdk already ensure each ctor only run once
   AsanInitInternal();
-}
-
-extern "C" void sgxsan_ecall_get_enclave_range(uintptr_t *enclave_base,
-                                               size_t *enclave_size) {
-  *enclave_base = g_enclave_base;
-  *enclave_size = g_enclave_size;
 }

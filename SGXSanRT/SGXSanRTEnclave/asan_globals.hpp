@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanRTCom.h"
+#include "SGXSanRTConfig.h"
 
 // This structure is used to describe the source location of a place where
 // global was defined.
@@ -23,12 +23,3 @@ struct __asan_global {
                                            // or NULL if it is unknown.
   uptr odr_indicator; // The address of the ODR indicator symbol.
 };
-
-#if defined(__cplusplus)
-extern "C" {
-#endif
-void __asan_register_globals(__asan_global *globals, uptr n);
-void __asan_unregister_globals(__asan_global *globals, uptr n);
-#if defined(__cplusplus)
-}
-#endif

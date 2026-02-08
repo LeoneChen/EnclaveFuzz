@@ -1,24 +1,12 @@
-[submodule "SVF"]
-	path = SVF
-	url = git@github.com:SVF-tools/SVF.git
-[submodule "edger8r"]
-	path = edger8r
-	url = git@github.com:LeoneChen/edger8r.git
-[submodule "json"]
-	path = json
-	url = git@github.com:nlohmann/json.git
-[submodule "SGXFuzzerRT/libFuzzer"]
-	path = SGXFuzzerRT/libFuzzer
-	url = git@github.com:LeoneChen/libFuzzer.git
-[submodule "magic_enum"]
-	path = magic_enum
-	url = git@github.com:Neargye/magic_enum.git
-[submodule "linux-sgx"]
-	path = linux-sgx
-	url = git@github.com:intel/linux-sgx.git
-[submodule "kAFL"]
-	path = kAFL
-	url = git@github.com:IntelLabs/kAFL.git
-[submodule "intel-sgx-ssl"]
-	path = intel-sgx-ssl
+[submodule "third_party/linux-sgx"]
+	path = third_party/linux-sgx
+	url = git@github.com:LeoneChen/linux-sgx.git
+[submodule "sgx_apps/intel-sgx-ssl"]
+	path = sgx_apps/intel-sgx-ssl
 	url = git@github.com:LeoneChen/intel-sgx-ssl.git
+[submodule "third_party/llvm-project"]
+	path = third_party/llvm-project
+	url = git@github.com:llvm/llvm-project.git
+[submodule "third_party/edger8r"]
+	path = third_party/edger8r
+	url = git@github.com:LeoneChen/edger8r.git

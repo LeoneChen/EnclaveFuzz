@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SGXSanRTCom.h"
+#include "SGXSanRTConfig.h"
 #include <cstddef>
 
 extern int asan_inited;

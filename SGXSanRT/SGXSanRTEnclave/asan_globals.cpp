@@ -1,12 +1,11 @@
 #include "asan_globals.hpp"
 #include "Poison.hpp"
-#include "SGXSanRTEnclave.hpp"
 
 typedef __asan_global Global;
 
-#ifndef Report
 #define Report log_warning
-#endif
+
+#define CHECK sgxsan_assert
 
 inline void PoisonRedZones(const Global &g) {
   uptr aligned_size = RoundUpTo(g.size, SHADOW_GRANULARITY);
@@ -40,6 +39,7 @@ static void RegisterGlobal(const Global *g) {
   PoisonRedZones(*g);
 }
 
+extern "C" {
 // Register an array of globals.
 void __asan_register_globals(__asan_global *globals, uptr n) {
   for (uptr i = 0; i < n; i++) {
@@ -73,4 +73,5 @@ void __asan_unregister_globals(__asan_global *globals, uptr n) {
 
   // Unpoison the metadata.
   UnPoisonShadow(reinterpret_cast<uptr>(globals), n * sizeof(__asan_global));
+}
 }

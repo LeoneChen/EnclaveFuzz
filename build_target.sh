@@ -1,0 +1,288 @@
+#!/bin/bash
+set -e
+
+PROJ_DIR=$(realpath $(dirname $0))
+
+TARGET_NAME=""
+TARGET_DIR=""
+BUILD_DIR=""
+INSTALL_DIR=""
+
+JOBS=$(nproc)
+DEBUG=0
+BUILD=0
+SETUP=0
+
+# MY_CC=${PROJ_DIR}/install/llvm-project/bin/clang
+# MY_CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
+MY_CC=clang-13
+MY_CXX=clang++-13
+
+show_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -h|--help           Show this help message"
+    echo "  -t|--target         Target to build"
+    echo "  -b|--build          Build"
+    echo "  -s|--setup          Set up for fuzzing"
+    echo "  -g|--debug          Debug mode"
+}
+
+OPTS=$(getopt -o ht:gbs -l help,target:,debug,build,setup -n 'parse-options' -- "$@")
+eval set -- "$OPTS"
+while true; do
+    case "$1" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -t|--target)
+            TARGET_NAME=$2
+            shift 2
+            ;;
+        -g|--debug)
+            DEBUG=1
+            shift
+            ;;
+        -b|--build)
+            BUILD=1
+            shift
+            ;;
+        -s|--setup)
+            SETUP=1
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+###################################
+# TARGET_DIR FOR DIFFERENT TARGETS
+###################################
+case "${TARGET_NAME}" in
+    "llvm-project")
+        TARGET_DIR=${PROJ_DIR}/ThirdParty/${TARGET_NAME}
+        BUILD_DIR=${PROJ_DIR}/build/${TARGET_NAME}
+        INSTALL_DIR=${PROJ_DIR}/install/${TARGET_NAME}
+        ;;
+    "wasm-micro-runtime"|"sgxwallet"|"SGX_SQLite"|"ehsm"|"sgx-reencrypt"|"sgx-wallet"|"SGXCryptoFile"|"mbedtls-SGX"|"TaLoS")
+        TARGET_DIR=${PROJ_DIR}/SGX_APP/${TARGET_NAME}
+        BUILD_DIR="InProject"
+        INSTALL_DIR="InProject"
+        ;;
+    "intel-sgx-ssl")
+        TARGET_DIR=${PROJ_DIR}/SGX_APP/${TARGET_NAME}
+        BUILD_DIR="InProject"
+        INSTALL_DIR=${PROJ_DIR}/install/enclave_fuzz/sgxssl
+        ;;
+    *)
+        echo "[!] Error: Unsupported target: ${TARGET_NAME}"
+        exit 1
+        ;;
+esac
+
+echo "[+] Building target: ${TARGET_DIR}"
+echo "[+] Build directory: ${BUILD_DIR}"
+echo "[+] Install directory: ${INSTALL_DIR}"
+
+###################################
+# BUILD FOR DIFFERENT TARGETS
+###################################
+if [ ${BUILD} -eq 1 ]; then
+    echo "[+] Building & installing..."
+    case "${TARGET_NAME}" in
+        "llvm-project")
+            pushd ${TARGET_DIR}
+                cmake -B ${BUILD_DIR} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCOMPILER_RT_DEBUG=ON -DLLVM_TARGETS_TO_BUILD="X86" -DLLVM_ENABLE_PROJECTS="clang;compiler-rt;lld" -DLLVM_ABI_BREAKING_CHECKS=FORCE_OFF ./llvm/ -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}
+                cmake --build ${BUILD_DIR} -j${JOBS}
+                cmake --install ${BUILD_DIR}
+            popd
+            ;;
+        "wasm-micro-runtime")
+            pushd ${TARGET_DIR}
+                if [ ${DEBUG} -eq 1 ]; then
+                    DEBUG_MAKE_FLAGS="SGX_DEBUG=1 SGX_PRERELEASE=0"
+                    DEBUG_CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Debug"
+                else
+                    DEBUG_MAKE_FLAGS="SGX_DEBUG=0 SGX_PRERELEASE=1"
+                    DEBUG_CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release"
+                fi
+                pushd product-mini/platforms/linux-sgx
+                    rm -rf build
+                    CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" cmake -B build -DENCLAVE_FUZZ=1 ${DEBUG_CMAKE_FLAGS} -DWAMR_BUILD_SIMD=0
+                    cmake --build build -j${JOBS}
+
+                    pushd enclave-sample
+                        make clean
+                        make SGX_MODE=SIM CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" SGX_SSL="${PROJ_DIR}/install/enclave_fuzz/sgxssl" ENCLAVE_FUZZ=1 ${DEBUG_MAKE_FLAGS} -j${JOBS}
+                    popd
+                popd
+            popd
+            ;;
+        "intel-sgx-ssl")
+            pushd ${TARGET_DIR}
+                # clean
+                if [ -f openssl_source/openssl/Makefile ]
+                then
+                    make -C openssl_source/openssl distclean
+                fi
+                make -C Linux clean
+                make -C Linux clean DEBUG=1
+                rm -rf Linux/package/lib64/* Linux/package/include/crypto/
+                # build
+                if [ ${DEBUG} -eq 1 ]; then
+                    DEBUG_MAKE_FLAGS="DEBUG=1"
+                else
+                    DEBUG_MAKE_FLAGS="DEBUG=0"
+                fi
+                make -C Linux sgxssl_no_mitigation SGX_MODE=SIM ENCLAVE_FUZZ=1 ${DEBUG_MAKE_FLAGS} CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" -j${JOBS}
+                # install for other apps
+                cp -rf ${TARGET_DIR}/Linux/package/* ${INSTALL_DIR}
+                pushd ${INSTALL_DIR}/lib64
+                    libs=(tsgxssl tsgxssl_crypto usgxssl tsgxssl_ssl)
+                    for lib in "${libs[@]}"; do
+                        if [[ ! -f libsgx_${lib}.a && -f libsgx_${lib}d.a ]]; then ln -sf libsgx_${lib}d.a libsgx_${lib}.a; fi
+                    done
+                popd
+            popd
+            ;;
+        "sgxwallet")
+            pushd ${TARGET_DIR}
+                # pushd scripts
+                #     ./build_deps.py
+                # popd
+                if [ -f Makefile ]; then
+                    make clean
+                fi
+                ./autoconf.bash
+                if [ ${DEBUG} -eq 1 ]; then
+                    DEBUG_FLAG=" -O2 -g"
+                else
+                    DEBUG_FLAG=" -O2"
+                fi
+                ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz --enable-sgx-simulation CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
+                make -j${JOBS}
+            popd
+            ;;
+        "SGX_SQLite"|"sgx-reencrypt"|"sgx-wallet"|"SGXCryptoFile")
+            pushd ${TARGET_DIR}
+                make clean
+                if [ ${DEBUG} -eq 1 ]; then
+                    DEBUG_FLAG=" SGX_DEBUG=1 SGX_PRERELEASE=0"
+                else
+                    DEBUG_FLAG=" SGX_DEBUG=0 SGX_PRERELEASE=1"
+                fi
+                make SGX_MODE=SIM CC=${MY_CC} CXX=${MY_CXX} SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" ${DEBUG_FLAG} -j${JOBS} ENCLAVE_FUZZ=1
+            popd
+            ;;
+        "ehsm")
+            pushd ${TARGET_DIR}
+                make clean SGX_SDK="${PROJ_DIR}/install/enclave_fuzz"
+                if [ ${DEBUG} -eq 1 ]; then
+                    DEBUG_FLAG=" SGX_DEBUG=1 SGX_PRERELEASE=0"
+                else
+                    DEBUG_FLAG=" SGX_DEBUG=0 SGX_PRERELEASE=1"
+                fi
+                make -C core SGX_MODE=SIM CC=${MY_CC} CXX=${MY_CXX} SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" ${DEBUG_FLAG} -j${JOBS}
+            popd
+            ;;
+        "mbedtls-SGX")
+            pushd ${TARGET_DIR}
+                rm -rf build
+                if [ ${DEBUG} -eq 1 ]; then
+                    DEBUG_FLAG=" -DCMAKE_BUILD_TYPE=Debug"
+                else
+                    DEBUG_FLAG=" -DCMAKE_BUILD_TYPE=Release"
+                fi
+                CC=${MY_CC} CXX=${MY_CXX} cmake -B build -DCOMPILE_EXAMPLES=1 -DSGX_SDK="${PROJ_DIR}/install/enclave_fuzz" ${DEBUG_FLAG}
+                cmake --build build -j${JOBS}
+            popd
+            ;;
+        "TaLoS")
+            pushd ${TARGET_DIR}/crypto
+                make -f Makefile.sgx clean
+                if [ ${DEBUG} -eq 1 ]; then
+                    DEBUG_FLAG=" SGX_DEBUG=1 SGX_PRERELEASE=0"
+                else
+                    DEBUG_FLAG=" SGX_DEBUG=0 SGX_PRERELEASE=1"
+                fi
+                make -f Makefile.sgx SGX_MODE=SIM CC=${MY_CC} CXX=${MY_CXX} SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" ${DEBUG_FLAG} -j${JOBS}
+            popd
+            ;;
+        *)
+            echo "[!] Error: Unsupported target: ${TARGET_NAME}"
+            exit 1
+            ;;
+    esac
+fi
+
+###################################
+# SETUP WORKDIR FOR TARGETS
+###################################
+if [ ${SETUP} -eq 1 ]; then
+    echo "[+] Setting up workdir..."
+    case "${TARGET_NAME}" in
+        "wasm-micro-runtime")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app product-mini/platforms/linux-sgx/enclave-sample/iwasm --enclave product-mini/platforms/linux-sgx/enclave-sample/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 1
+            popd
+            ;;
+        "intel-sgx-ssl")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app Linux/sgx/test_app/TestApp --enclave Linux/sgx/test_app/TestEnclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 2
+            popd
+            ;;
+        "sgxwallet")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app sgxwallet --enclave secure_enclave/secure_enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 3
+            popd
+            ;;
+        "SGX_SQLite")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app app --enclave enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 4
+            popd
+            ;;
+        "ehsm")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app out/ehsm-core/ehsm_core_test --enclave out/ehsm-core/libenclave-ehsm-core.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 5
+            popd
+            ;;
+        "sgx-reencrypt")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app bin/test-app --enclave reencrypt.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 6
+            popd
+            ;;
+        "sgx-wallet")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app sgx-wallet --enclave enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 7
+            popd
+            ;;
+        "SGXCryptoFile")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app sgxCryptoFile --enclave CryptoEnclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 8
+            popd
+            ;;
+        "mbedtls-SGX")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app build/s_client --enclave build/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 9
+            popd
+            ;;
+        "TaLoS")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app crypto/link --enclave crypto/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 10
+            popd
+            ;;
+        *)
+            echo "[!] Error: Unsupported target: ${TARGET_NAME}"
+            exit 1
+            ;;
+    esac
+fi

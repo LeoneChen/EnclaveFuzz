@@ -2,7 +2,7 @@
 
 #include "ContainerAllocator.hpp"
 #include "Poison.hpp"
-#include "SGXSanRTCom.h"
+#include "SGXSanRTConfig.h"
 #include <cstddef>
 #include <queue>
 

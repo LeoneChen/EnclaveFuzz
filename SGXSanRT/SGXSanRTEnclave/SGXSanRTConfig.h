@@ -1,17 +1,16 @@
 #pragma once
 
-#include "SGXSanRTConfig.h"
 #include <stdint.h>
 #include <stdlib.h>
+
+#define USED_LOG_LEVEL LOG_LEVEL_WARNING
 
 /* Page assumption */
 #define PAGE_SIZE 0x1000
 #define PAGE_SIZE_SHIFT 12
 
 /* Shadow basic settings */
-#ifndef SHADOW_OFFSET
 #define SHADOW_OFFSET 0x7fff8000
-#endif
 #define X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS 47
 #define SHADOW_SCALE 3
 #define ADDR_SPACE_BITS X86_64_4LEVEL_PAGE_TABLE_ADDR_SPACE_BITS
@@ -43,10 +42,6 @@
 #define kHighShadowGuardEnd (kHighShadowEnd + PAGE_SIZE)
 
 /* Log util */
-#ifndef USED_LOG_LEVEL
-#define USED_LOG_LEVEL LOG_LEVEL_WARNING
-#endif
-
 enum log_level {
   LOG_LEVEL_NONE,
   LOG_LEVEL_ERROR,
@@ -114,7 +109,7 @@ typedef signed long long s64;
   uptr bp = (uptr)__builtin_frame_address(0);                                  \
   uptr pc = (uptr)__builtin_return_address(0);                                 \
   uptr local_stack;                                                            \
-  uptr sp = (uptr)&local_stack
+  uptr sp = (uptr) & local_stack
 
 /* Check util */
 #define sgxsan_error(cond, ...)                                                \
@@ -127,27 +122,6 @@ typedef signed long long s64;
   } while (0);
 
 #define sgxsan_assert(cond) sgxsan_error(!(cond), "Assert Fail: " #cond "\n");
-
-#define sgxsan_warning(cond, ...)                                              \
-  do {                                                                         \
-    if (!!(cond)) {                                                            \
-      log_warning(__VA_ARGS__);                                                \
-      sgxsan_backtrace();                                                      \
-    }                                                                          \
-  } while (0);
-
-#define CHECK_IMPL(c1, op, c2)                                                 \
-  do {                                                                         \
-    sgxsan_assert(c1 op c2);                                                   \
-  } while (0)
-
-#define CHECK(a) CHECK_IMPL((a), !=, 0)
-#define CHECK_EQ(a, b) CHECK_IMPL((a), ==, (b))
-#define CHECK_NE(a, b) CHECK_IMPL((a), !=, (b))
-#define CHECK_LT(a, b) CHECK_IMPL((a), <, (b))
-#define CHECK_LE(a, b) CHECK_IMPL((a), <=, (b))
-#define CHECK_GT(a, b) CHECK_IMPL((a), >, (b))
-#define CHECK_GE(a, b) CHECK_IMPL((a), >=, (b))
 
 /* Alignment util */
 static inline bool IsAligned(uptr a, uptr alignment) {
@@ -171,14 +145,6 @@ static inline uptr RoundDownTo(uptr x, uptr boundary) {
 
 static inline uptr RoundUpDiv(uptr x, uptr boundary) {
   return (x + boundary - 1) / boundary;
-}
-
-static inline uptr ExtendInt8(uint8_t _8bit) {
-  uptr result = 0;
-  for (size_t i = 0; i < sizeof(uptr); i++) {
-    result = (result << 8) + _8bit;
-  }
-  return result;
 }
 
 /* Memory tools */

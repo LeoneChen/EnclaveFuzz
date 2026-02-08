@@ -1,6 +1,4 @@
 #include "ErrorReport.hpp"
-#include "PoisonCheck.hpp"
-#include "StackTrace.hpp"
 #include <cstdlib>
 #include <stdarg.h>
 #include <stdio.h>
@@ -114,31 +112,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   sgxsan_backtrace(ll);
   PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");
-#if (ENABLE_SAN_CHECK_DIE == 1)
   if (fatal)
     abort();
-#endif
   return;
-}
-
-enum SensitiveDataType { LoadedData = 0, ArgData, ReturnedData };
-extern "C" void ReportSensitiveDataLeak(SensitiveDataType srcType,
-                                        uptr srcInfo1, uptr srcInfo2,
-                                        uptr dstAddr, uptr dstSize) {
-  log_warning("Possible leak of sensitive data\n");
-  if (srcType == LoadedData) {
-    uptr srcAddr = srcInfo1;
-    size_t srcSize = srcInfo2;
-    GET_CALLER_PC_BP_SP;
-    ReportGenericError(pc, bp, sp, srcAddr, false, srcSize, false,
-                       "[WARNING] Leak of Sensitive Data");
-
-  } else if (srcType == ArgData or srcType == ReturnedData) {
-    sptr argPos = (sptr)srcInfo2;
-    uptr funcAddr = srcInfo1;
-    log_warning("Src info: Arg %ld of func at 0x%lx\n", argPos, funcAddr);
-  } else {
-    abort();
-  }
-  log_warning("Dst info: 0x%lx(0x%lx)\n", dstAddr, dstSize);
 }

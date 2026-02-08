@@ -1,8 +1,8 @@
 *.o
 *.a
 *.so
-build_dir
-install_dir
+build
+install
 install
 sgx_edger8r
 vtune

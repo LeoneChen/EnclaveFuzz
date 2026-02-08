@@ -2,7 +2,7 @@
 #include "MemAccessMgr.hpp"
 #include "Poison.hpp"
 #include "PoisonCheck.hpp"
-#include "SGXSanRTCom.h"
+#include "SGXSanRTConfig.h"
 
 #define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                      \
   extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##size(            \
@@ -13,10 +13,8 @@
                          "Invalid address");                                   \
     }                                                                          \
     uptr smp = MEM_TO_SHADOW(addr);                                            \
-    uptr s = size <= SHADOW_GRANULARITY                                        \
-                 ? ((*reinterpret_cast<u8 *>(smp)) & (kL1Filter))              \
-                 : ((*reinterpret_cast<u16 *>(smp)) &                          \
-                    ((kL1Filter << 8) | kL1Filter));                           \
+    uptr s = size <= SHADOW_GRANULARITY ? (*reinterpret_cast<u8 *>(smp))       \
+                                        : (*reinterpret_cast<u16 *>(smp));     \
     if (UNLIKELY(s)) {                                                         \
       if (UNLIKELY(size >= SHADOW_GRANULARITY ||                               \
                    ((s8)((addr & (SHADOW_GRANULARITY - 1)) + size - 1)) >=     \

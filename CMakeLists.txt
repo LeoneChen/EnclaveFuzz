@@ -1,11 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(SGXSan)
 
-set(LINUX_SGX_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/linux-sgx")
-set(SGXSAN_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(KAFL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/kAFL)
-set(KAFL_EXAMPLES_DIR ${KAFL_DIR}/kafl/examples)
-configure_file(SGXSanConfig.h.in SGXSanConfig.h @ONLY)
+set(SGXSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/linux-sgx")
 
 # get LLVM_DIR
 set(LLVM_DIR "$ENV{LLVM_DIR}")
@@ -20,61 +16,36 @@ message(STATUS "Found LLVM_DIR: ${LLVM_INSTALL_PREFIX}")
 
 add_subdirectory(SGXSanPass)
 add_subdirectory(SGXSanRT)
-add_subdirectory(SGXFuzzerPass)
 add_subdirectory(SGXFuzzerRT)
-if(KAFL_FUZZER)
-message(STATUS "Fuzzer: kAFL")
-add_subdirectory(kAFLUSpaceUtil)
-else()
-message(STATUS "Fuzzer: libFuzzer")
-endif()
 
 install(TARGETS
         SGXSanPass
         SGXSanRTApp
         SGXSanRTEnclave
-        SGXFuzzerPass
         SGXFuzzerRT
-        FuncRenamePass
-        GetOCallTable
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
-
-if(KAFL_FUZZER)
-install(TARGETS
-        nyx_agent
-        nyx_agent_static
-        vmcall
-        LIBRARY DESTINATION lib64
-        ARCHIVE DESTINATION lib64)
-
-install(DIRECTORY kAFLUSpaceUtil/initrd/
-        USE_SOURCE_PERMISSIONS
-        DESTINATION initrd)
-
-install(FILES Tool/rand_file
-        DESTINATION .)
-endif()
 
 install(FILES SGXSanRT/SGXSanRTEnclave/SGXSanRTEnclave.edl
         DESTINATION include)
 
-install(FILES Tool/sgx_edger8r
-        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
-        DESTINATION bin/x64)
+install(FILES third_party/edger8r/_build/default/linux/Edger8r.bc
+    PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+    RENAME sgx_edger8r
+    DESTINATION bin/x64)
 
-install(DIRECTORY ${LINUX_SGX_SRC_DIR}/common/inc/ DESTINATION include
-        PATTERN common/inc/internal EXCLUDE)
+install(DIRECTORY
+    ${SGXSDK_DIR}/common/inc/
+    ${SGXSDK_DIR}/external/dcap_source/QuoteGeneration/pce_wrapper/inc/
+    DESTINATION include
+    PATTERN common/inc/internal EXCLUDE)
 
-install(DIRECTORY ${LINUX_SGX_SRC_DIR}/sdk/tlibcxx/include/
+install(DIRECTORY ${SGXSDK_DIR}/sdk/tlibcxx/include/
         DESTINATION include/libcxx)
 
-install(DIRECTORY ${LINUX_SGX_SRC_DIR}/external/ippcp_internal/inc/
+install(DIRECTORY ${SGXSDK_DIR}/external/ippcp_internal/inc/
         DESTINATION include/ipp
         PATTERN "ippcp20u3.patch" EXCLUDE)
 
-install(DIRECTORY ${LINUX_SGX_SRC_DIR}/external/dcap_source/QuoteGeneration/pce_wrapper/inc/
-        DESTINATION include)
-
-install(FILES ${LINUX_SGX_SRC_DIR}/common/buildenv.mk
+install(FILES ${SGXSDK_DIR}/common/buildenv.mk
         DESTINATION .)
