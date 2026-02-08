@@ -163,14 +163,15 @@ if [ ${BUILD_SDK} -eq 1 ]; then
     cp ${SGXSDK_DIR}/external/dcap_source/QuoteVerification/{dcap_tvl/sgx_dcap_tvl.edl,QvE/Include/sgx_qve_header.h} ${INSTALL_DIR}/include
     cp ${SGXSDK_DIR}/external/dcap_source/QuoteGeneration/quote_wrapper/common/inc/{sgx_ql_lib_common,sgx_ql_quote,sgx_quote_3}.h ${INSTALL_DIR}/include
     get_enclave_lib "${SGXSDK_DIR}/sdk/simulation/tservice_sim"                     "libsgx_tservice_sim.a"
-    get_enclave_lib "${SGXSDK_DIR}/sdk/simulation/trtssim"                          "linux/libsgx_trts_sim.a"
+    # asan is not initialized before init_enclave in trts, enclave ctor is delayed until first ecall
+    get_enclave_lib_orig "${SGXSDK_DIR}/sdk/simulation/trtssim"                          "linux/libsgx_trts_sim.a"
     get_enclave_lib_orig "${SGXSDK_DIR}/sdk/trts"                                   "linux/libsgx_trts.a"
 
     echo "== Get libsgx_tcxx.a =="
     rm -f ${SGXSDK_DIR}/build/linux/libsgx_tcxx.a
     make clean -s -C ${SGXSDK_DIR}/sdk/tlibcxx
     make clean -s -C ${SGXSDK_DIR}/sdk/cpprt
-    make -C ${SGXSDK_DIR}/sdk tcxx -j${JOBS} ${COMMON_COMPILE_FLAGS}
+    make -C ${SGXSDK_DIR}/sdk tcxx -j${JOBS} COMMON_FLAGS="${COMMON_COMPILE_FLAGS}"
     cp ${SGXSDK_DIR}/build/linux/libsgx_tcxx.a ${INSTALL_DIR}/lib64/
 
     echo "== Get libsgx_tstdc.a =="
@@ -181,15 +182,15 @@ if [ ${BUILD_SDK} -eq 1 ]; then
     make clean -s -C ${SGXSDK_DIR}/sdk/tsafecrt
     make clean -s -C ${SGXSDK_DIR}/sdk/tsetjmp
     make clean -s -C ${SGXSDK_DIR}/sdk/tmm_rsrv
-    make -C ${SGXSDK_DIR}/sdk tstdc -j${JOBS} ${COMMON_COMPILE_FLAGS}
-    cp ${SGXSDK_DIR}/build/linux/libsgx_tstdc.a ${PREFIX}/lib64/
+    make -C ${SGXSDK_DIR}/sdk tstdc -j${JOBS} COMMON_FLAGS="${COMMON_COMPILE_FLAGS}"
+    cp ${SGXSDK_DIR}/build/linux/libsgx_tstdc.a ${INSTALL_DIR}/lib64/
 
     echo "== Get libsgx_tservice.a =="
     rm -f ${SGXSDK_DIR}/build/linux/libsgx_tservice.a
     make clean -s -C ${SGXSDK_DIR}/sdk/selib/linux
     make clean -s -C ${SGXSDK_DIR}/sdk/tseal/linux
     make clean -s -C ${SGXSDK_DIR}/sdk/ec_dh_lib
-    make -C ${SGXSDK_DIR}/sdk tservice -j${JOBS} ${COMMON_COMPILE_FLAGS}
+    make -C ${SGXSDK_DIR}/sdk tservice -j${JOBS} COMMON_FLAGS="${COMMON_COMPILE_FLAGS}"
     cp ${SGXSDK_DIR}/build/linux/libsgx_tservice.a ${INSTALL_DIR}/lib64/
 
     ########## TOOL ##########

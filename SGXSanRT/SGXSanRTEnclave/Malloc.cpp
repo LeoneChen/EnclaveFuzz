@@ -15,12 +15,13 @@ size_t global_heap_usage = 0;
 struct chunk {
   size_t magic; // ensure queried user_beg is correct
   uptr alloc_beg;
+  uptr alloc_size;
   size_t user_size;
 };
 
 void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *),
                        bool true_add_false_minus) {
-#if (USED_LOG_LEVEL >= 3 /* LOG_LEVEL_DEBUG */)
+#if (g_log_level >= 3 /* LOG_LEVEL_DEBUG */)
   static uint64_t heapLogIndex = 0;
   if (ptr) {
     pthread_mutex_lock(&mutex);
@@ -56,19 +57,18 @@ void *MALLOC(size_t size) {
 
   uptr alignment = SHADOW_GRANULARITY;
 
-  uptr rz_size = ComputeRZSize(size);
+  uptr rz_size =
+      std::max(ComputeRZSize(size), RoundUpTo(sizeof(chunk), alignment));
   uptr rounded_size = RoundUpTo(size, alignment);
   uptr needed_size = rounded_size + 2 * rz_size;
 
   void *allocated = BACKEND_MALLOC(needed_size);
-  update_heap_usage(allocated, BACKEND_MALLOC_USABLE_SZIE);
-
-  size_t allocated_size = BACKEND_MALLOC_USABLE_SZIE(allocated);
-  needed_size = allocated_size;
-
   if (allocated == nullptr) {
     return nullptr;
   }
+  update_heap_usage(allocated, BACKEND_MALLOC_USABLE_SZIE);
+
+  size_t allocated_size = BACKEND_MALLOC_USABLE_SZIE(allocated);
 
   uptr alloc_beg = reinterpret_cast<uptr>(allocated);
   // If dlmalloc doesn't return an aligned memory, it's troublesome.
@@ -76,7 +76,7 @@ void *MALLOC(size_t size) {
   sgxsan_assert(
       IsAligned(alloc_beg, alignment) &&
       "here I want to see whether dlmalloc return an unaligned memory");
-  uptr alloc_end = alloc_beg + needed_size;
+  uptr alloc_end = alloc_beg + allocated_size;
 
   uptr user_beg = alloc_beg + rz_size;
   if (!IsAligned(user_beg, alignment))
@@ -91,6 +91,7 @@ void *MALLOC(size_t size) {
   // if alloc_beg is not aligned, we cannot automatically calculate it
   m->magic = 0xDEADBEEF;
   m->alloc_beg = alloc_beg;
+  m->alloc_size = allocated_size;
   m->user_size = size;
   log_trace("\n");
   log_trace("[Malloc] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", alloc_beg, user_beg,
@@ -108,42 +109,46 @@ void *MALLOC(size_t size) {
 }
 
 void FREE(void *ptr) {
+  uptr user_beg;
+  chunk *m = nullptr;
+  QuarantineElement qe;
+  uptr alignment = SHADOW_GRANULARITY;
   if (not asan_inited) {
-    update_heap_usage(ptr, BACKEND_MALLOC_USABLE_SZIE, false);
-    BACKEND_FREE(ptr);
-    return;
+    goto fallback;
   }
   if (ptr == nullptr)
     return;
 
-  uptr user_beg = reinterpret_cast<uptr>(ptr);
+  user_beg = reinterpret_cast<uptr>(ptr);
+  m = reinterpret_cast<chunk *>(user_beg - sizeof(chunk));
+  if (m->magic != 0xDEADBEEF) {
+    goto fallback;
+  }
+
   if (*(uint8_t *)MEM_TO_SHADOW(user_beg) == kAsanHeapFreeMagic) {
     GET_CALLER_PC_BP_SP;
     ReportGenericError(pc, bp, sp, user_beg, 0, 1, true, "Double Free");
   }
-  uptr alignment = SHADOW_GRANULARITY;
   sgxsan_assert(IsAligned(user_beg, alignment));
 
-  uptr chunk_beg = user_beg - sizeof(chunk);
-  chunk *m = reinterpret_cast<chunk *>(chunk_beg);
-  sgxsan_assert(m->magic == 0xDEADBEEF);
-  size_t user_size = m->user_size;
   log_trace("\n");
   log_trace("[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg,
-            user_beg + user_size,
-            m->alloc_beg + ComputeRZSize(user_size) * 2 +
-                RoundUpTo(user_size, alignment));
-  FastPoisonShadow(user_beg, RoundUpTo(user_size, alignment),
+            user_beg + m->user_size,
+            m->alloc_beg + ComputeRZSize(m->user_size) * 2 +
+                RoundUpTo(m->user_size, alignment));
+  FastPoisonShadow(user_beg, RoundUpTo(m->user_size, alignment),
                    kAsanHeapFreeMagic);
-  size_t alloc_size =
-      /* ComputeRZSize(user_size) * 2 + RoundUpTo(user_size, alignment) */
-      BACKEND_MALLOC_USABLE_SZIE((void *)m->alloc_beg);
 
-  QuarantineElement qe = {.alloc_beg = m->alloc_beg,
-                          .alloc_size = alloc_size,
-                          .user_beg = user_beg,
-                          .user_size = user_size};
+  qe = {.alloc_beg = m->alloc_beg,
+        .alloc_size = m->alloc_size,
+        .user_beg = user_beg,
+        .user_size = m->user_size};
   QuarantineCache::put(qe);
+  return;
+
+fallback:
+  update_heap_usage(ptr, BACKEND_MALLOC_USABLE_SZIE, false);
+  BACKEND_FREE(ptr);
 }
 
 void *CALLOC(size_t n_elements, size_t elem_size) {

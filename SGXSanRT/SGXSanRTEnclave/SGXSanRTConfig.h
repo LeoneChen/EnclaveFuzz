@@ -3,8 +3,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define USED_LOG_LEVEL LOG_LEVEL_WARNING
-
 /* Page assumption */
 #define PAGE_SIZE 0x1000
 #define PAGE_SIZE_SHIFT 12
@@ -49,6 +47,8 @@ enum log_level {
   LOG_LEVEL_DEBUG,
   LOG_LEVEL_TRACE,
 };
+
+extern enum log_level g_log_level;
 
 #define log_always(...) sgxsan_log(LOG_LEVEL_NONE, true, __VA_ARGS__)
 #define log_error(...) sgxsan_log(LOG_LEVEL_ERROR, true, __VA_ARGS__)

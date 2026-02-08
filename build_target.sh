@@ -74,12 +74,12 @@ case "${TARGET_NAME}" in
         INSTALL_DIR=${PROJ_DIR}/install/${TARGET_NAME}
         ;;
     "wasm-micro-runtime"|"sgxwallet"|"SGX_SQLite"|"ehsm"|"sgx-reencrypt"|"sgx-wallet"|"SGXCryptoFile"|"mbedtls-SGX"|"TaLoS")
-        TARGET_DIR=${PROJ_DIR}/SGX_APP/${TARGET_NAME}
+        TARGET_DIR=${PROJ_DIR}/sgx_apps/${TARGET_NAME}
         BUILD_DIR="InProject"
         INSTALL_DIR="InProject"
         ;;
     "intel-sgx-ssl")
-        TARGET_DIR=${PROJ_DIR}/SGX_APP/${TARGET_NAME}
+        TARGET_DIR=${PROJ_DIR}/sgx_apps/${TARGET_NAME}
         BUILD_DIR="InProject"
         INSTALL_DIR=${PROJ_DIR}/install/enclave_fuzz/sgxssl
         ;;
@@ -143,7 +143,7 @@ if [ ${BUILD} -eq 1 ]; then
                 else
                     DEBUG_MAKE_FLAGS="DEBUG=0"
                 fi
-                make -C Linux sgxssl_no_mitigation SGX_MODE=SIM ENCLAVE_FUZZ=1 ${DEBUG_MAKE_FLAGS} CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" -j${JOBS}
+                make -C Linux sgxssl_no_mitigation SGX_MODE=SIM ENCLAVE_FUZZ=1 ${DEBUG_MAKE_FLAGS} CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" SKIP_INTELCPU_CHECK=TRUE -j${JOBS}
                 # install for other apps
                 cp -rf ${TARGET_DIR}/Linux/package/* ${INSTALL_DIR}
                 pushd ${INSTALL_DIR}/lib64
@@ -180,7 +180,7 @@ if [ ${BUILD} -eq 1 ]; then
                 else
                     DEBUG_FLAG=" SGX_DEBUG=0 SGX_PRERELEASE=1"
                 fi
-                make SGX_MODE=SIM CC=${MY_CC} CXX=${MY_CXX} SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" ${DEBUG_FLAG} -j${JOBS} ENCLAVE_FUZZ=1
+                make SGX_MODE=HW CC=${MY_CC} CXX=${MY_CXX} SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" ${DEBUG_FLAG} -j${JOBS} ENCLAVE_FUZZ=1
             popd
             ;;
         "ehsm")
@@ -262,7 +262,7 @@ if [ ${SETUP} -eq 1 ]; then
             ;;
         "sgx-wallet")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app sgx-wallet --enclave enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 7
+                ${PROJ_DIR}/script/setup.sh --app sgx-wallet --enclave enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 7
             popd
             ;;
         "SGXCryptoFile")

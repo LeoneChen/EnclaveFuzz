@@ -7,7 +7,7 @@ CompileFlags:
         -I/home/leone/EnclaveFuzz1/third_party/llvm-project/compiler-rt/include/fuzzer,
         -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/common/inc,
         -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/common/inc/internal,
-        -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/common/inc/tlibc/,
+        # -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/common/inc/tlibc/,
         -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/sdk/trts,
         -I/usr/include/llvm-13/,
         -I/usr/lib/llvm-13/include,

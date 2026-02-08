@@ -16,7 +16,7 @@ static const char *log_level_to_prefix[] = {
 
 // can't call malloc, since malloc may call this function
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
-  if (ll > USED_LOG_LEVEL)
+  if (ll > g_log_level)
     return;
 
   char buf[BUFSIZ] = {'\0'};

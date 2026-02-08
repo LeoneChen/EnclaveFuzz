@@ -10,3 +10,6 @@
 [submodule "third_party/edger8r"]
 	path = third_party/edger8r
 	url = git@github.com:LeoneChen/edger8r.git
+[submodule "sgx_apps/sgx-wallet"]
+	path = sgx_apps/sgx-wallet
+	url = git@github.com:LeoneChen/sgx-wallet.git

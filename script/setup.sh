@@ -66,5 +66,5 @@ mkdir -p ${WORKDIR}/result/{seeds,crashes}
 cp ${APP_PATH} ${WORKDIR}/TestApp
 cp ${ENCLAVE_PATH} ${WORKDIR}/TestEnclave
 # cp ${SCRIPT_DIR}/stop.sh ${WORKDIR}
-SGXSDK=$(realpath ${SCRIPT_DIR}/../../install/enclave_fuzz) JOBS=${JOBS} TASKSET=${TASKSET} envsubst '${SGXSDK} ${JOBS} ${TASKSET}' < ${SCRIPT_DIR}/fuzz.sh > ${WORKDIR}/fuzz.sh
+SGXSDK=$(realpath ${SCRIPT_DIR}/../install/enclave_fuzz) JOBS=${JOBS} TASKSET=${TASKSET} envsubst '${SGXSDK} ${JOBS} ${TASKSET}' < ${SCRIPT_DIR}/fuzz.sh > ${WORKDIR}/fuzz.sh
 chmod +x ${WORKDIR}/fuzz.sh

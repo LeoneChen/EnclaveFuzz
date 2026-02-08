@@ -5,18 +5,26 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(libFuzzer) Launch",
+            "name": "TestApp",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/mnt/data/EnclaveFuzzData/TALOS/Fuzzer1-HW-T0-2023-08-30/FuzzTaLoS.debug",
+            "program": "${workspaceFolder}/workdir/sgx-wallet/TestApp",
             "args": [
-                "--cb_enclave=enclave.signed.so.debug",
-                "-max_len=10000000",
-                "./result/crashes/crash-7f73b5e784ddc972aab0206a88e3036cc647c84e"
+                "./result/seeds",
+                "-artifact_prefix=./result/crashes/",
+                // "./result/crashes/crash-10df032c2d6e79b8241d80e4faa0b50cef1a08d3",
+                // "-runs=0"
+                // "-fork=1",
+                // "-ignore_crashes=1",
             ],
             "stopAtEntry": false,
-            "cwd": "/mnt/data/EnclaveFuzzData/TALOS/Fuzzer1-HW-T0-2023-08-30",
-            "environment": [],
+            "cwd": "${workspaceFolder}/workdir/sgx-wallet",
+            "environment": [
+                {
+                    "name": "LD_LIBRARY_PATH",
+                    "value": "/home/leone/EnclaveFuzz1/install/enclave_fuzz/lib64"
+                }
+            ],
             "externalConsole": false,
             // "MIMode": "gdb",
             "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
@@ -32,41 +40,12 @@
                     "ignoreFailures": true
                 },
                 {
-                    "text": "-gdb-set substitute-path /libunwind /home/chenliheng/Fuzzer1.0/linux-sgx/sdk/cpprt/linux/libunwind",
+                    "text": "-gdb-set substitute-path /build/glibc-B3wQXB/glibc-2.31/ /home/leone/glibc-2.31",
+                },
+                {
+                    "text": "-gdb-set substitute-path /home/leone/EnclaveFuzz1/third_party/linux-sgx/sdk/simulation/urtssim/linux/enter_enclave.S /home/leone/EnclaveFuzz1/third_party/linux-sgx/psw/urts/linux/enter_enclave.S",
                 }
             ]
         },
-        {
-            "name": "(kAFL) Launch",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/SGX_APP/wasm-micro-runtime/product-mini/platforms/linux-sgx/enclave-sample/iwasm",
-            "args": [],
-            "stopAtEntry": true,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": false,
-            // "MIMode": "gdb",
-            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                },
-                {
-                    "description": "Set Disassembly Flavor to Intel",
-                    "text": "-gdb-set disassembly-flavor intel",
-                    "ignoreFailures": true
-                },
-                {
-                    "text": "handle SIGILL nostop",
-                }
-            ],
-            "hardwareBreakpoints": {
-                "require": true,
-            },
-            "miDebuggerServerAddress": "localhost:5555"
-        }
     ]
 }

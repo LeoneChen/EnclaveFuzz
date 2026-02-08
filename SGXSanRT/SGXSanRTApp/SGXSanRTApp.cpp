@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 uptr g_enclave_base = 0, g_enclave_size = 0;
+enum log_level g_log_level = LOG_LEVEL_WARNING;
 
 std::string sgxsan_exec(const char *cmd) {
   std::array<char, 128> buffer;
@@ -46,7 +47,7 @@ static const char *log_level_to_prefix[] = {
 };
 
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
-  if (ll > USED_LOG_LEVEL)
+  if (ll > g_log_level)
     return;
 
   if (with_prefix) {
@@ -125,7 +126,7 @@ void sgxsan_dump_bt_buf(void **array, size_t size) {
 }
 
 void sgxsan_backtrace(log_level ll) {
-  if (ll > USED_LOG_LEVEL)
+  if (ll > g_log_level)
     return;
 
   size_t max_bt_count = 100;
