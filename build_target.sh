@@ -122,7 +122,7 @@ if [ ${BUILD} -eq 1 ]; then
 
                     pushd enclave-sample
                         make clean
-                        make SGX_MODE=SIM CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" SGX_SSL="${PROJ_DIR}/install/enclave_fuzz/sgxssl" ENCLAVE_FUZZ=1 ${DEBUG_MAKE_FLAGS} -j${JOBS}
+                        make SGX_MODE=HW CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" SGX_SSL="${PROJ_DIR}/install/enclave_fuzz/sgxssl" ENCLAVE_FUZZ=1 ${DEBUG_MAKE_FLAGS} -j${JOBS}
                     popd
                 popd
             popd
@@ -232,7 +232,7 @@ if [ ${SETUP} -eq 1 ]; then
     case "${TARGET_NAME}" in
         "wasm-micro-runtime")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app product-mini/platforms/linux-sgx/enclave-sample/iwasm --enclave product-mini/platforms/linux-sgx/enclave-sample/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 1
+                ${PROJ_DIR}/script/setup.sh --app product-mini/platforms/linux-sgx/enclave-sample/iwasm --enclave product-mini/platforms/linux-sgx/enclave-sample/enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 1
             popd
             ;;
         "intel-sgx-ssl")

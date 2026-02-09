@@ -13,3 +13,9 @@
 [submodule "sgx_apps/sgx-wallet"]
 	path = sgx_apps/sgx-wallet
 	url = git@github.com:LeoneChen/sgx-wallet.git
+[submodule "sgx_apps/wasm-micro-runtime"]
+	path = sgx_apps/wasm-micro-runtime
+	url = git@github.com:LeoneChen/wasm-micro-runtime.git
+[submodule "EnclavePatch-Data"]
+	path = EnclavePatch-Data
+	url = git@github.com:LeoneChen/EnclavePatch-Data.git

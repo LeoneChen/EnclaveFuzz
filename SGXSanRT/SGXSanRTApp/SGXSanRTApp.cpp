@@ -142,41 +142,43 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   ucontext_t *ucontext = (ucontext_t *)priv;
   if (signum == SIGSEGV) {
     // process siginfo
+    greg_t pc = ucontext->uc_mcontext.gregs[REG_RIP];
     if (siginfo->si_code == SI_KERNEL) {
       // If si_code is SI_KERNEL, #PF address is not true
-      log_error("#PF Addr Unknown at pc %p\n",
-                ucontext->uc_mcontext.gregs[REG_RIP]);
+      log_error("#PF Addr Unknown at pc %p\n", pc);
     } else {
       void *pf_addr_p = siginfo->si_addr;
-      log_error("#PF Addr %p at pc %p => ", pf_addr_p,
-                ucontext->uc_mcontext.gregs[REG_RIP]);
+      log_error("#PF Addr %p at pc %p => ", pf_addr_p, pc);
       uint64_t page_fault_addr = (uint64_t)pf_addr_p;
       if (pf_addr_p == nullptr) {
-        log_error("Null-Pointer dereference\n");
+        log_error_np("Null-Pointer dereference\n");
       } else if (((g_enclave_base - PAGE_SIZE) <= page_fault_addr &&
                   page_fault_addr < g_enclave_base) ||
                  ((g_enclave_base + g_enclave_size) <= page_fault_addr &&
                   page_fault_addr <=
                       (g_enclave_base + g_enclave_size - 1 + PAGE_SIZE))) {
-        log_error("Pointer dereference overflows enclave boundray (Overlapping "
-                  "memory access)\n");
+        log_error_np(
+            "Pointer dereference overflows enclave boundray (Overlapping "
+            "memory access)\n");
       } else if ((g_enclave_base + g_enclave_size - 0x1000) <=
                      page_fault_addr &&
                  page_fault_addr < (g_enclave_base + g_enclave_size)) {
-        log_error("Infer pointer dereference overflows enclave boundray, as "
-                  "mprotect's effort is page-granularity and si_addr only give "
-                  "page-granularity address\n");
+        log_error_np(
+            "Infer pointer dereference overflows enclave boundray, as "
+            "mprotect's effort is page-granularity and si_addr only give "
+            "page-granularity address\n");
       } else if ((kLowShadowGuardBeg <= page_fault_addr &&
                   page_fault_addr < kLowShadowBeg) ||
                  (kHighShadowEnd < page_fault_addr &&
                   page_fault_addr <= kHighShadowGuardEnd)) {
-        log_error("Pointer dereference overflows shadow map boundray "
-                  "(Overlapping memory access)\n");
+        log_error_np("Pointer dereference overflows shadow map boundray "
+                     "(Overlapping memory access)\n");
       } else if ((kHighShadowEnd + 1 - 0x1000) <= page_fault_addr &&
                  page_fault_addr <= kHighShadowEnd) {
-        log_error("Infer pointer dereference overflows shadow map boundray, as "
-                  "mprotect's effort is page-granularity and si_addr only give "
-                  "page-granularity address\n");
+        log_error_np(
+            "Infer pointer dereference overflows shadow map boundray, as "
+            "mprotect's effort is page-granularity and si_addr only give "
+            "page-granularity address\n");
       }
     }
   }

@@ -8,17 +8,17 @@
             "name": "TestApp",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/workdir/sgx-wallet/TestApp",
+            "program": "${workspaceFolder}/workdir/wasm-micro-runtime/TestApp",
             "args": [
-                "./result/seeds",
-                "-artifact_prefix=./result/crashes/",
-                // "./result/crashes/crash-10df032c2d6e79b8241d80e4faa0b50cef1a08d3",
+                // "./result/seeds",
+                // "-artifact_prefix=./result/crashes/",
+                "./result/crashes/crash-52fdd9dbf6e3856b7b25aaa93a2138609cc872fd",
                 // "-runs=0"
                 // "-fork=1",
                 // "-ignore_crashes=1",
             ],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/workdir/sgx-wallet",
+            "cwd": "${workspaceFolder}/workdir/wasm-micro-runtime",
             "environment": [
                 {
                     "name": "LD_LIBRARY_PATH",
