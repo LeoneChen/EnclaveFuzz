@@ -16,7 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
-#include "AddressSanitizer.h"
+#include "PassUtil.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -27,6 +27,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -56,6 +57,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
@@ -65,6 +67,8 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/Pass.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -72,7 +76,9 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Instrumentation.h"
+#include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizerOptions.h"
 #include "llvm/Transforms/Utils/ASanStackFrameLayout.h"
@@ -81,6 +87,7 @@
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include <algorithm>
+#include <assert.h>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -183,7 +190,7 @@ const char kAMDGPUAddressPrivateName[] = "llvm.amdgcn.is.private";
 #endif
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
-// static const size_t kNumberOfAccessSizes = 5;
+static const size_t kNumberOfAccessSizes = 5;
 
 static const unsigned kAllocaRzSize = 32;
 
@@ -445,14 +452,12 @@ namespace {
 /// If InGlobal is true, then
 ///   extern char __asan_shadow[];
 ///   shadow = (mem >> Scale) + &__asan_shadow
-#if 0
 struct ShadowMapping {
   int Scale;
   uint64_t Offset;
   bool OrShadowOffset;
   bool InGlobal;
 };
-#endif
 
 } // end anonymous namespace
 
@@ -621,7 +626,6 @@ private:
 char ASanGlobalsMetadataWrapperPass::ID = 0;
 
 /// AddressSanitizer: instrument the code in module to find memory bugs.
-#if 0
 struct AddressSanitizer {
   AddressSanitizer(Module &M, const GlobalsMetadata *GlobalsMD,
                    bool CompileKernel = false, bool Recover = false,
@@ -692,6 +696,14 @@ struct AddressSanitizer {
   bool maybeInsertAsanInitAtFunctionEntry(Function &F);
   bool maybeInsertDynamicShadowAtFunctionEntry(Function &F);
   void markEscapedLocalAllocas(Function &F);
+  void declareAdditionalSymbol(Module &M);
+  /// \brief Instrument \c memset_s/memmove_s/memcpy_s
+  void instrumentSecMemIntrinsic(CallInst *CI);
+  /// \brief Instrument \c TDECallConstructor and \c TDECallDestructor at begin
+  /// and end of ecall wrapper respectively
+  void instrumentTDECallMgr(Function *ecallWrapper);
+  bool instrumentRealECall(CallInst *CI);
+  bool instrumentOcallWrapper(Function &OcallWrapper);
 
 private:
   friend struct FunctionStackPoisoner;
@@ -747,41 +759,16 @@ private:
 
   FunctionCallee AMDGPUAddressShared;
   FunctionCallee AMDGPUAddressPrivate;
+
+  FunctionCallee MemAccessMgrActive, MemAccessMgrDeactive,
+      MemAccessMgrOutEnclaveAccess, MemAccessMgrInEnclaveAccess, SGXSanMemcpyS,
+      SGXSanMemsetS, SGXSanMemmoveS, TDECallConstructor, TDECallDestructor,
+      PushOCAllocStack, PopOCAllocStack;
+  std::unordered_set<Function *> TDMgrInstrumentedEcall;
+  Constant *globalFuncName = nullptr;
+  std::map<Type *, bool> typeHasPointerMap;
+  SGXSanInstVisitor mInstVisitor;
 };
-#endif
-
-AddressSanitizer::AddressSanitizer(
-    Module &M, const GlobalsMetadata *GlobalsMD, bool CompileKernel,
-    bool Recover, bool UseAfterScope,
-    AsanDetectStackUseAfterReturnMode UseAfterReturn)
-    : CompileKernel(ClEnableKasan.getNumOccurrences() > 0 ? ClEnableKasan
-                                                          : CompileKernel),
-      Recover(ClRecover.getNumOccurrences() > 0 ? ClRecover : Recover),
-      UseAfterScope(UseAfterScope || ClUseAfterScope),
-      UseAfterReturn(ClUseAfterReturn.getNumOccurrences() ? ClUseAfterReturn
-                                                          : UseAfterReturn),
-      GlobalsMD(*GlobalsMD) {
-  C = &(M.getContext());
-  LongSize = M.getDataLayout().getPointerSizeInBits();
-  IntptrTy = Type::getIntNTy(*C, LongSize);
-  TargetTriple = Triple(M.getTargetTriple());
-
-  Mapping = getShadowMapping(TargetTriple, LongSize, this->CompileKernel);
-
-  assert(this->UseAfterReturn != AsanDetectStackUseAfterReturnMode::Invalid);
-}
-
-uint64_t AddressSanitizer::getAllocaSizeInBytes(const AllocaInst &AI) const {
-  uint64_t ArraySize = 1;
-  if (AI.isArrayAllocation()) {
-    const ConstantInt *CI = dyn_cast<ConstantInt>(AI.getArraySize());
-    assert(CI && "non-constant array size");
-    ArraySize = CI->getZExtValue();
-  }
-  Type *Ty = AI.getAllocatedType();
-  uint64_t SizeInBytes = AI.getModule()->getDataLayout().getTypeAllocSize(Ty);
-  return SizeInBytes * ArraySize;
-}
 
 class AddressSanitizerLegacyPass : public FunctionPass {
 public:
@@ -823,7 +810,6 @@ private:
   AsanDetectStackUseAfterReturnMode UseAfterReturn;
 };
 
-#if 0
 class ModuleAddressSanitizer {
 public:
   ModuleAddressSanitizer(Module &M, const GlobalsMetadata *GlobalsMD,
@@ -921,45 +907,6 @@ private:
   Function *AsanCtorFunction = nullptr;
   Function *AsanDtorFunction = nullptr;
 };
-#endif
-
-ModuleAddressSanitizer::ModuleAddressSanitizer(Module &M,
-                                               const GlobalsMetadata *GlobalsMD,
-                                               bool CompileKernel, bool Recover,
-                                               bool UseGlobalsGC,
-                                               bool UseOdrIndicator,
-                                               AsanDtorKind DestructorKind)
-    : GlobalsMD(*GlobalsMD),
-      CompileKernel(ClEnableKasan.getNumOccurrences() > 0 ? ClEnableKasan
-                                                          : CompileKernel),
-      Recover(ClRecover.getNumOccurrences() > 0 ? ClRecover : Recover),
-      UseGlobalsGC(UseGlobalsGC && ClUseGlobalsGC && !this->CompileKernel),
-      // Enable aliases as they should have no downside with ODR indicators.
-      UsePrivateAlias(UseOdrIndicator || ClUsePrivateAlias),
-      UseOdrIndicator(UseOdrIndicator || ClUseOdrIndicator),
-      // Not a typo: ClWithComdat is almost completely pointless without
-      // ClUseGlobalsGC (because then it only works on modules without
-      // globals, which are rare); it is a prerequisite for ClUseGlobalsGC;
-      // and both suffer from gold PR19002 for which UseGlobalsGC constructor
-      // argument is designed as workaround. Therefore, disable both
-      // ClWithComdat and ClUseGlobalsGC unless the frontend says it's ok to
-      // do globals-gc.
-      UseCtorComdat(UseGlobalsGC && ClWithComdat && !this->CompileKernel),
-      DestructorKind(DestructorKind) {
-  C = &(M.getContext());
-  int LongSize = M.getDataLayout().getPointerSizeInBits();
-  IntptrTy = Type::getIntNTy(*C, LongSize);
-  TargetTriple = Triple(M.getTargetTriple());
-  Mapping = getShadowMapping(TargetTriple, LongSize, this->CompileKernel);
-
-  if (ClOverrideDestructorKind != AsanDtorKind::Invalid)
-    this->DestructorKind = ClOverrideDestructorKind;
-  assert(this->DestructorKind != AsanDtorKind::Invalid);
-}
-
-uint64_t ModuleAddressSanitizer::getMinRedzoneSizeForGlobal() const {
-  return getRedzoneSizeForScale(Mapping.Scale);
-}
 
 class ModuleAddressSanitizerLegacyPass : public ModulePass {
 public:
@@ -3868,7 +3815,103 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty());
 }
 
-ShadowMapping ASanGetShadowMapping(Triple &TargetTriple, int LongSize,
-                                   bool IsKasan) {
-  return getShadowMapping(TargetTriple, LongSize, IsKasan);
+bool adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F) {
+  static SGXSanInstVisitor IV;
+  // initialize
+  Module *M = F.getParent();
+  IRBuilder<> IRB(M->getContext());
+  FunctionCallee SetUSP = M->getOrInsertFunction(
+      "set_untrust_sp", IRB.getVoidTy(), IRB.getInt64Ty());
+  FunctionCallee GetUSP =
+      M->getOrInsertFunction("get_untrust_sp", IRB.getInt64Ty());
+
+  // get interesting callinst
+  SmallVector<CallInst *> OcallocVec, OcfreeVec,
+      CallInstVec = IV.visitFunction(F).CallInstVec;
+  for (auto CI : CallInstVec) {
+    StringRef callee_name = getDirectCalleeName(CI);
+    if (callee_name == "sgx_ocalloc") {
+      OcallocVec.push_back(CI);
+    } else if (callee_name == "sgx_ocfree") {
+      OcfreeVec.push_back(CI);
+    }
+  }
+
+  // instrument
+  IRB.SetInsertPoint(&F.front().front());
+  Value *usp = IRB.CreateAlloca(IRB.getInt64Ty());
+  for (auto CI : OcallocVec) {
+    IRB.SetInsertPoint(CI);
+    IRB.CreateStore(IRB.CreateCall(GetUSP), usp);
+  }
+  for (auto CI : OcfreeVec) {
+    IRB.SetInsertPoint(CI->getNextNode());
+    IRB.CreateCall(SetUSP, IRB.CreateLoad(IRB.getInt64Ty(), usp));
+  }
+  return true;
 }
+
+namespace {
+struct SGXSanLegacyPass : public ModulePass {
+  static char ID;
+  SGXSanLegacyPass() : ModulePass(ID) {}
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<TargetLibraryInfoWrapperPass>();
+  }
+
+  bool runOnModule(Module &M) override {
+    bool Changed = false;
+
+    // run SGXSan Pass
+    // dbgs() << "== SGXSan Pass: " << M.getName().str() << " ==\n";
+    GlobalsMetadata GlobalsMD = GlobalsMetadata(M);
+    AddressSanitizer ASan(M, &GlobalsMD, false, false, true,
+                          AsanDetectStackUseAfterReturnMode::Never);
+    for (Function &F : M) {
+      if (F.isDeclaration())
+        continue;
+
+      if (F.getName().startswith("sgxsan_ocall_") ||
+          F.getName().startswith("sgx_sgxsan_ecall_") ||
+          F.getName().startswith("fuzzer_ocall_") ||
+          F.getName().startswith("sgx_fuzzer_ecall_")) {
+        Changed |= adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
+        // Since we have monitored malloc-serial function, (linkonce_odr type
+        // function) in library which will check shadowbyte whether instrumented
+        // or not is not necessary. don't call instrumentFunction()
+      } else {
+        const TargetLibraryInfo *TLI =
+            &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F);
+        // hook sgx-specifical callee, normal asan, elrange check, Out-Addr
+        // Whitelist check, GlobalPropageteWhitelist Sensitive area check,
+        // Whitelist fill, Whitelist (De)Active, poison etc.
+        Changed |= ASan.instrumentFunction(F, TLI);
+      }
+    }
+    ModuleAddressSanitizer MASan(M, &GlobalsMD);
+    Changed |= MASan.instrumentModule(M);
+    return Changed;
+  }
+}; // end of struct SGXSanLegacyPass
+} // end of anonymous namespace
+
+char SGXSanLegacyPass::ID = 0;
+
+static RegisterStandardPasses register_lto_pass(
+    PassManagerBuilder::EP_FullLinkTimeOptimizationEarly,
+    [](const PassManagerBuilder &Builder, legacy::PassManagerBase &PM) {
+      PM.add(new SGXSanLegacyPass());
+    });
+
+static RegisterStandardPasses l0_register_std_pass(
+    PassManagerBuilder::EP_EnabledOnOptLevel0,
+    [](const PassManagerBuilder &Builder, legacy::PassManagerBase &PM) {
+      PM.add(new SGXSanLegacyPass());
+    });
+
+static RegisterStandardPasses moe_register_std_pass(
+    PassManagerBuilder::EP_ModuleOptimizerEarly,
+    [](const PassManagerBuilder &Builder, legacy::PassManagerBase &PM) {
+      PM.add(new SGXSanLegacyPass());
+    });
