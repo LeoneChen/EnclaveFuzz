@@ -14,19 +14,17 @@ list(APPEND CMAKE_PREFIX_PATH "${LLVM_DIR}/lib/cmake/llvm/")
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM_DIR: ${LLVM_INSTALL_PREFIX}")
 
-add_subdirectory(SGXSanPass)
-add_subdirectory(SGXSanRT)
-add_subdirectory(SGXFuzzerRT)
+add_subdirectory(pass)
+add_subdirectory(runtime)
 
 install(TARGETS
         SGXSanPass
         SGXSanRTApp
         SGXSanRTEnclave
-        SGXFuzzerRT
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64)
 
-install(FILES SGXSanRT/SGXSanRTEnclave/SGXSanRTEnclave.edl
+install(FILES runtime/enclave/SGXSanRTEnclave.edl
         DESTINATION include)
 
 install(FILES third_party/edger8r/_build/default/linux/Edger8r.bc

@@ -1,4 +1,4 @@
-set(LIBFUZZER_DIR ../third_party/llvm-project/compiler-rt/lib/fuzzer/)
+set(LIBFUZZER_DIR ../../third_party/llvm-project/compiler-rt/lib/fuzzer/)
 set(LIBFUZZER_SRC
     ${LIBFUZZER_DIR}/FuzzerCrossOver.cpp
     ${LIBFUZZER_DIR}/FuzzerDataFlowTrace.cpp
@@ -25,20 +25,15 @@ set(LIBFUZZER_SRC
     ${LIBFUZZER_DIR}/FuzzerUtilPosix.cpp
     ${LIBFUZZER_DIR}/FuzzerUtilWindows.cpp)
 
-set(FUZZER_RT_SRC
-    libFuzzerCallback.cpp)
-
 include_directories(
     ${LIBFUZZER_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../enclave
     ${SGXSDK_DIR}/common/inc
     ${LLVM_INSTALL_PREFIX}/lib/clang/13.0.1/include/fuzzer)
 
-add_library(
-    SGXFuzzerRT STATIC 
-    ${LIBFUZZER_SRC}
-    ${FUZZER_RT_SRC})
+add_library(SGXSanRTApp STATIC SGXSanRTApp.cpp test.cpp ${LIBFUZZER_SRC})
 
 set_target_properties(
-    SGXFuzzerRT PROPERTIES
+    SGXSanRTApp PROPERTIES
     POSITION_INDEPENDENT_CODE True
     COMPILE_FLAGS "-Wall -Wno-unused-result -std=c++17")

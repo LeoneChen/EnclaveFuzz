@@ -8,7 +8,6 @@ SGXSDK_DIR=$(realpath ${PROJ_DIR}/third_party/linux-sgx)
 IS_DEBUG=0
 PREPARE_SDK=0
 BUILD_SDK=0
-BUILD_SSL=0
 
 # MY_CC=${PROJ_DIR}/install/llvm-project/bin/clang
 # MY_CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
@@ -28,11 +27,10 @@ show_help() {
     echo "  -g                  Build in debug mode"
     echo "  --prepare-sdk       Prepare SGX SDK (only once needed)"
     echo "  --build-sdk         Build SGX SDK"
-    echo "  --build-ssl         Build SGX SSL"
     exit 0
 }
 
-OPTS=$(getopt -o hg -l help,prepare-sdk,build-sdk,build-ssl -n 'parse-options' -- "$@")
+OPTS=$(getopt -o hg -l help,prepare-sdk,build-sdk -n 'parse-options' -- "$@")
 eval set -- "$OPTS"
 while true; do
     case "$1" in
@@ -51,10 +49,6 @@ while true; do
             ;;
         --build-sdk)
             BUILD_SDK=1
-            shift
-            ;;
-        --build-ssl)
-            BUILD_SSL=1
             shift
             ;;
         --)
@@ -202,13 +196,4 @@ if [ ${BUILD_SDK} -eq 1 ]; then
     popd
 
     echo "[*] Successfully get SGXSDK"
-fi
-
-if [ ${BUILD_SSL} -eq 1 ]; then
-    echo "[*] Get Intel SGXSSL"
-    if [ ${IS_DEBUG} -eq 1 ]; then
-        ./build_target.sh -t intel-sgx-ssl -b -g
-    else
-        ./build_target.sh -t intel-sgx-ssl -b
-    fi
 fi
