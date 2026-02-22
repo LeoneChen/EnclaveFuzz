@@ -237,12 +237,12 @@ if [ ${SETUP} -eq 1 ]; then
             ;;
         "intel-sgx-ssl")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app Linux/sgx/test_app/TestApp --enclave Linux/sgx/test_app/TestEnclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 2
+                ${PROJ_DIR}/script/setup.sh --app Linux/sgx/test_app/TestApp --enclave Linux/sgx/test_app/TestEnclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 2
             popd
             ;;
         "sgxwallet")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app sgxwallet --enclave secure_enclave/secure_enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 3
+                ${PROJ_DIR}/script/setup.sh --app sgxwallet --enclave secure_enclave/secure_enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 3 --extra-flags="-rss_limit_mb=10240"
             popd
             ;;
         "SGX_SQLite")

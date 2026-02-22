@@ -43,10 +43,10 @@ void libunwind_backtrace(std::vector<uint64_t> &ret_addrs,
 }
 
 void sgxsan_backtrace(log_level ll) {
+  dump_sancov();
   std::vector<uint64_t> ret_addrs;
   libunwind_backtrace(ret_addrs);
   if (ret_addrs.size() > 0) {
-    sgxsan_log(ll, false, "============= Stack Trace Begin ==============\n");
     sgxsan_ocall_addr2line(ret_addrs.data(), ret_addrs.size(), ll);
   }
 }

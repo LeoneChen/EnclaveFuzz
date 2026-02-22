@@ -21,8 +21,29 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+extern "C" {
+void __sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop);
+void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
+                              const uintptr_t *pcs_end);
+}
+
+// Cache for symbolization results
+struct SymbolInfo {
+  std::string func;
+  std::string file;
+  std::string line;
+  std::string module_path;
+  uptr module_base;
+  bool has_module_info;
+  int is_pie_result;
+};
+
+static thread_local std::unordered_map<uptr, SymbolInfo> symbolize_cache;
 uptr g_enclave_base = 0, g_enclave_size = 0;
 enum log_level g_log_level = LOG_LEVEL_WARNING;
+uint8_t *g_sancov_cntrs_copy_start = nullptr,
+        *g_sancov_cntrs_copy_end = nullptr;
+uintptr_t *g_sancov_pcs_copy_start = nullptr, *g_sancov_pcs_copy_end = nullptr;
 
 std::string sgxsan_exec(const char *cmd) {
   std::array<char, 128> buffer;
@@ -103,26 +124,47 @@ int is_pie(const char *path) {
   return ehdr.e_type == ET_DYN;
 }
 
-void sgxsan_dump_bt_buf(void **array, size_t size) {
-  log_always_np("[*] SGXSan Backtrace:\n");
-  Dl_info info;
-  for (size_t i = 0; i < size; i++) {
-    if (dladdr(array[i], &info) != 0) {
-      std::stringstream cmd;
-      if (is_pie(info.dli_fname) > 0) {
-        cmd << "llvm-addr2line-13 -afCpi --adjust-vma=0x" << std::hex
-            << (uptr)info.dli_fbase << " -e " << info.dli_fname << " "
-            << ((uptr)array[i] - 4);
-      } else {
-        cmd << "llvm-addr2line-13 -afCpi -e " << info.dli_fname << " "
-            << std::hex << ((uptr)array[i] - 4);
-      }
-      auto result = sgxsan_exec(cmd.str().c_str());
-      log_always_np("%s", result.c_str());
-    } else {
-      log_always_np("%p\n", array[i]);
+/// Resolve module info for a runtime PC.
+/// Handles enclave, host PIE, and host non-PIE binaries.
+bool resolve_module_info(uptr pc, SymbolInfo &sym_info) {
+  if (g_enclave_base <= pc && pc < g_enclave_base + g_enclave_size) {
+    sym_info.has_module_info = true;
+    sym_info.module_path = "TestEnclave";
+    sym_info.module_base = g_enclave_base;
+    sym_info.is_pie_result = 1;
+  } else {
+    Dl_info info;
+    sym_info.has_module_info = (dladdr((void *)pc, &info) != 0);
+    if (sym_info.has_module_info) {
+      sym_info.module_path = info.dli_fname;
+      sym_info.module_base = (uptr)info.dli_fbase;
+      sym_info.is_pie_result = is_pie(info.dli_fname);
     }
   }
+  return sym_info.has_module_info;
+}
+
+/// Low-level addr2line: given explicit module info, run llvm-addr2line-13.
+std::string run_addr2line(const char *module_path, uptr addr, int pie_status,
+                          uptr base_addr, const char *extra_flags = "") {
+  std::stringstream cmd;
+  cmd << "llvm-addr2line-13 -afC";
+  if (extra_flags && extra_flags[0])
+    cmd << " " << extra_flags;
+  if (pie_status > 0)
+    cmd << " --adjust-vma=0x" << std::hex << base_addr;
+  cmd << " -e " << module_path << " " << std::hex << addr;
+  return sgxsan_exec(cmd.str().c_str());
+}
+
+/// High-level addr2line: auto-resolve module from a runtime PC.
+std::string addr2line_for_pc(uptr pc, const char *extra_flags = "") {
+  SymbolInfo sym_info;
+  if (!resolve_module_info(pc, sym_info))
+    return "";
+
+  return run_addr2line(sym_info.module_path.c_str(), pc, sym_info.is_pie_result,
+                       sym_info.module_base, extra_flags);
 }
 
 void sgxsan_backtrace(log_level ll) {
@@ -133,7 +175,15 @@ void sgxsan_backtrace(log_level ll) {
   uint64_t bt_buf[max_bt_count];
   size_t bt_cnt =
       boost::stacktrace::safe_dump_to(bt_buf, sizeof(decltype(bt_buf)));
-  sgxsan_dump_bt_buf((void **)bt_buf, bt_cnt);
+
+  for (size_t i = 0; i < bt_cnt; i++) {
+    auto result = addr2line_for_pc((uptr)bt_buf[i] - 4, "-pi");
+    if (!result.empty()) {
+      log_always_np("%s", result.c_str());
+    } else {
+      log_always_np("%p\n", bt_buf[i]);
+    }
+  }
 }
 
 /* Signal */
@@ -150,7 +200,7 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
       void *pf_addr_p = siginfo->si_addr;
       log_error("#PF Addr %p at pc %p => ", pf_addr_p, pc);
       uint64_t page_fault_addr = (uint64_t)pf_addr_p;
-      if (pf_addr_p == nullptr) {
+      if (0 <= (uptr)pf_addr_p && (uptr)pf_addr_p < PAGE_SIZE) {
         log_error_np("Null-Pointer dereference\n");
       } else if (((g_enclave_base - PAGE_SIZE) <= page_fault_addr &&
                   page_fault_addr < g_enclave_base) ||
@@ -237,7 +287,11 @@ extern "C" {
 // ASAN's __asan_init -> __sanitizer_cov_8bit_counters_init ->
 // setCovMapAddr -> sgx_create_enclave -> enclave_create_ex -> reg_sig_handler
 // -> sgx_ecall -> SGXSan's __asan_init
-void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size) {
+void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size,
+                                     uint64_t *cntrs_copy_start,
+                                     uint64_t *cntrs_copy_end,
+                                     uint64_t *pcs_copy_start,
+                                     uint64_t *pcs_copy_end) {
   // Init Enclave info outside Enclave
   g_enclave_base = enclave_base;
   g_enclave_size = enclave_size;
@@ -264,6 +318,10 @@ void sgxsan_ocall_init_shadow_memory(uptr enclave_base, uptr enclave_size) {
   PrintAddressSpaceLayout();
 
   reg_sgxsan_sigaction();
+  *cntrs_copy_start = (uint64_t)g_sancov_cntrs_copy_start;
+  *cntrs_copy_end = (uint64_t)g_sancov_cntrs_copy_end;
+  *pcs_copy_start = (uint64_t)g_sancov_pcs_copy_start;
+  *pcs_copy_end = (uint64_t)g_sancov_pcs_copy_end;
 }
 
 /* OCall functions */
@@ -276,12 +334,250 @@ void sgxsan_ocall_print_string(const char *str) {
 
 /* addr2line */
 void sgxsan_ocall_addr2line(uint64_t *addr_arr, size_t arr_cnt, int level) {
-  for (size_t i = 0; i < arr_cnt; i++) {
-    std::stringstream cmd;
-    cmd << "llvm-addr2line-13 -afCpi --adjust-vma=0x" << std::hex
-        << (uptr)g_enclave_base << " -e TestEnclave " << (addr_arr[i] - 4);
-    auto ret = sgxsan_exec(cmd.str().c_str());
-    sgxsan_log((log_level)level, false, ret.c_str());
+  log_level ll = (log_level)level;
+
+  // Capture host stack
+  const size_t max_bt_count = 100;
+  uint64_t bt_buf[max_bt_count];
+  size_t bt_cnt =
+      boost::stacktrace::safe_dump_to(bt_buf, sizeof(decltype(bt_buf)));
+
+  // Print host ocall frames until we find sgx_urts_vdso_handler
+  size_t i = 0;
+  for (; i < bt_cnt; i++) {
+    auto result = addr2line_for_pc((uptr)bt_buf[i] - 4, "-pi");
+    if (!result.empty()) {
+      // sgxsan_log(ll, false, "%s", result.c_str());
+      if (result.find("sgx_urts_vdso_handler") != std::string::npos ||
+          result.find("__morestack") != std::string::npos) {
+        i++;
+        break;
+      }
+    }
+    // else {
+    //   sgxsan_log(ll, false, "%p\n", (void *)bt_buf[i]);
+    // }
   }
+  // sgxsan_log(ll, false, "---- ocall to host ----\n");
+
+  // Insert enclave frames
+  for (size_t j = 0; j < arr_cnt; j++) {
+    auto ret =
+        run_addr2line("TestEnclave", addr_arr[j] - 4, 1, g_enclave_base, "-pi");
+    sgxsan_log(ll, false, "%s", ret.c_str());
+  }
+
+  sgxsan_log(ll, false, "---- ecall to enclave ----\n");
+  // Print remaining host caller frames
+  for (; i < bt_cnt; i++) {
+    auto result = addr2line_for_pc((uptr)bt_buf[i] - 4, "-pi");
+    if (!result.empty())
+      sgxsan_log(ll, false, "%s", result.c_str());
+    else
+      sgxsan_log(ll, false, "%p\n", (void *)bt_buf[i]);
+  }
+}
+
+void sancov_copy_init() {
+  auto result =
+      sgxsan_exec("size -A TestEnclave|grep __sancov_cntrs|awk '{print $2}'");
+  auto cntrs_size = std::stoull(result);
+  result =
+      sgxsan_exec("size -A TestEnclave|grep __sancov_pcs|awk '{print $2}'");
+  auto pcs_size = std::stoull(result);
+  if (!cntrs_size || !pcs_size || cntrs_size != (pcs_size / 16)) {
+    fprintf(stderr, "cntrs/pcs size invalid\n");
+    abort();
+  }
+  g_sancov_cntrs_copy_start = (uint8_t *)calloc(1, cntrs_size);
+  g_sancov_pcs_copy_start = (uintptr_t *)calloc(16, cntrs_size);
+  if (!g_sancov_cntrs_copy_start || !g_sancov_pcs_copy_start) {
+    fprintf(stderr,
+            "g_sancov_cntrs_copy_start/g_sancov_pcs_copy_start calloc fail\n");
+    abort();
+  }
+  g_sancov_cntrs_copy_end = g_sancov_cntrs_copy_start + cntrs_size;
+  __sanitizer_cov_8bit_counters_init(g_sancov_cntrs_copy_start,
+                                     g_sancov_cntrs_copy_end);
+  g_sancov_pcs_copy_end = g_sancov_pcs_copy_start + cntrs_size * 2;
+  __sanitizer_cov_pcs_init(g_sancov_pcs_copy_start, g_sancov_pcs_copy_end);
+}
+
+// void __sanitizer_print_stack_trace() { sgxsan_backtrace(LOG_LEVEL_ERROR); }
+
+void ClearSymbolizeCache() { symbolize_cache.clear(); }
+void __sanitizer_symbolize_pc(uptr pc, const char *fmt, char *out_buf,
+                              uptr out_buf_size) {
+  if (out_buf == nullptr || out_buf_size == 0)
+    return;
+
+  // Check cache first
+  auto it = symbolize_cache.find(pc);
+  SymbolInfo sym_info;
+
+  if (it != symbolize_cache.end()) {
+    // Cache hit
+    sym_info = it->second;
+  } else {
+    // Cache miss - perform symbolization
+    resolve_module_info(pc, sym_info);
+
+    sym_info.func = "??";
+    sym_info.file = "??";
+    sym_info.line = "0";
+    if (sym_info.has_module_info) {
+      // Get raw output
+      std::string output =
+          run_addr2line(sym_info.module_path.c_str(), pc,
+                        sym_info.is_pie_result, sym_info.module_base);
+
+      // Parse output
+      std::stringstream ss(output);
+      std::string line_addr, line_func, line_file_loc;
+
+      std::getline(ss, line_addr); // Consume address line
+      if (std::getline(ss, line_func))
+        sym_info.func = line_func;
+      if (std::getline(ss, line_file_loc)) {
+        size_t last_colon = line_file_loc.find_last_of(':');
+        if (last_colon != std::string::npos) {
+          sym_info.file = line_file_loc.substr(0, last_colon);
+          sym_info.line = line_file_loc.substr(last_colon + 1);
+        } else {
+          sym_info.file = line_file_loc;
+        }
+      }
+    }
+    // Add to cache
+    symbolize_cache[pc] = sym_info;
+  }
+
+  // Format output according to fmt
+  std::stringstream out;
+  if (!fmt)
+    fmt = "%p in %f %s:%l";
+
+  for (const char *p = fmt; *p != '\0'; ++p) {
+    if (*p != '%') {
+      out << *p;
+      continue;
+    }
+    p++;
+    switch (*p) {
+    case '%':
+      out << "%";
+      break;
+    case 'n':
+      out << "0"; // frame number (always 0 for single frame)
+      break;
+    case 'p':
+      out << "0x" << std::hex << pc << std::dec;
+      break;
+    case 'm':
+      out << (sym_info.has_module_info ? sym_info.module_path : "??");
+      break;
+    case 'o':
+      if (sym_info.has_module_info && sym_info.is_pie_result > 0) {
+        out << "0x" << std::hex << (pc - sym_info.module_base) << std::dec;
+      } else {
+        out << "0x" << std::hex << pc << std::dec;
+      }
+      break;
+    case 'f':
+      out << sym_info.func;
+      break;
+    case 'q':
+      out << "0x0";
+      break;
+    case 's':
+      out << sym_info.file;
+      break;
+    case 'l':
+      out << sym_info.line;
+      break;
+    case 'c':
+      out << "0";
+      break;
+    case 'F':
+      out << "in " << sym_info.func;
+      break;
+    case 'S':
+      out << sym_info.file << ":" << sym_info.line << ":0";
+      break;
+    case 'L':
+      if (sym_info.file != "??") {
+        out << sym_info.file << ":" << sym_info.line;
+      } else if (sym_info.has_module_info) {
+        out << "(" << sym_info.module_path << "+0x" << std::hex;
+        if (sym_info.is_pie_result > 0) {
+          out << (pc - sym_info.module_base);
+        } else {
+          out << pc;
+        }
+        out << std::dec << ")";
+      } else {
+        out << "(<unknown module>)";
+      }
+      break;
+    case 'M':
+      if (sym_info.has_module_info) {
+        const char *basename = strrchr(sym_info.module_path.c_str(), '/');
+        basename = basename ? basename + 1 : sym_info.module_path.c_str();
+        out << "(" << basename << "+0x" << std::hex;
+        if (sym_info.is_pie_result > 0) {
+          out << (pc - sym_info.module_base);
+        } else {
+          out << pc;
+        }
+        out << std::dec << ")";
+      } else {
+        out << "(" << "0x" << std::hex << pc << std::dec << ")";
+      }
+      break;
+    default:
+      out << *p;
+      break;
+    }
+  }
+
+  snprintf(out_buf, out_buf_size, "%s", out.str().c_str());
+}
+
+int __sanitizer_get_module_and_offset_for_pc(uptr pc, char *module_name,
+                                             uptr module_name_len,
+                                             uptr *pc_offset) {
+  if (g_enclave_base <= pc && pc < g_enclave_base + g_enclave_size) {
+    // Fill module name
+    if (module_name && module_name_len) {
+      strncpy(module_name, "TestEnclave", module_name_len - 1);
+      module_name[module_name_len - 1] = '\0';
+    }
+
+    // Calculate offset
+    if (pc_offset) {
+      *pc_offset = pc - g_enclave_base; // Relative offset for enclave
+    }
+  } else {
+    Dl_info info;
+    if (dladdr((void *)pc, &info) == 0) {
+      return false;
+    }
+
+    // Fill module name
+    if (module_name && module_name_len) {
+      strncpy(module_name, info.dli_fname, module_name_len - 1);
+      module_name[module_name_len - 1] = '\0';
+    }
+
+    // Calculate offset
+    if (pc_offset) {
+      if (is_pie(info.dli_fname) > 0) {
+        *pc_offset = pc - (uptr)info.dli_fbase; // Relative offset for libraries
+      } else {
+        *pc_offset = pc; // Absolute address for main app
+      }
+    }
+  }
+  return true;
 }
 }

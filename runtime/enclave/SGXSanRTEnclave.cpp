@@ -13,9 +13,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-static pthread_mutex_t sgxsan_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 enum log_level g_log_level = LOG_LEVEL_WARNING;
 int asan_inited = 0;
+uint8_t *g_sancov_cntrs_start = nullptr, *g_sancov_cntrs_end = nullptr;
+uintptr_t *g_sancov_pcs_start = nullptr, *g_sancov_pcs_end = nullptr;
+uint8_t *g_sancov_copy_cntrs_start = nullptr,
+        *g_sancov_copy_cntrs_end = nullptr;
+uintptr_t *g_sancov_copy_pcs_start = nullptr, *g_sancov_copy_pcs_end = nullptr;
 
 /* Internal exception handler */
 // #PF etc. need platform (e.g. SGXv2 CPU) support conditonal exception handling
@@ -27,8 +31,12 @@ int sgxsan_exception_handler(sgx_exception_info_t *info) {
 
 /* Initialize */
 static void init_shadow_memory_out_enclave() {
-  sgxsan_assert(SGX_SUCCESS == sgxsan_ocall_init_shadow_memory(g_enclave_base,
-                                                               g_enclave_size));
+  sgxsan_assert(SGX_SUCCESS == sgxsan_ocall_init_shadow_memory(
+                                   g_enclave_base, g_enclave_size,
+                                   (uptr *)&g_sancov_copy_cntrs_start,
+                                   (uptr *)&g_sancov_copy_cntrs_end,
+                                   (uptr *)&g_sancov_copy_pcs_start,
+                                   (uptr *)&g_sancov_copy_pcs_end));
   // Poison shadow map of Enclave heap
   uptr enclaveHeapBase = (uptr)get_heap_base();
   size_t enclaveHeapSize = get_heap_size();
@@ -49,28 +57,23 @@ static void AsanInitInternal() {
                 nullptr);
 }
 
-void AsanInitFromRtl() {
-  pthread_mutex_lock(&sgxsan_init_mutex);
-  AsanInitInternal();
-  pthread_mutex_unlock(&sgxsan_init_mutex);
-}
-
-void __asan_init() {
+extern "C" void __asan_init() {
   // sgxsdk already ensure each ctor only run once
   AsanInitInternal();
 }
 
 extern "C" {
-uint8_t *g_sancov_cntrs_start = nullptr, *g_sancov_cntrs_end = nullptr;
-uintptr_t *g_sancov_pcs_start = nullptr, *g_sancov_pcs_end = nullptr;
 
-void sgxsan_ecall_dump_sancov(uint64_t cntrs_start, uint64_t cntrs_end,
-                              uint64_t pcs_start, uint64_t pcs_end) {
-  memcpy_s((void *)cntrs_start, cntrs_end - cntrs_start, g_sancov_cntrs_start,
-           g_sancov_cntrs_end - g_sancov_cntrs_start);
-  memcpy_s((void *)pcs_start, pcs_end - pcs_start, g_sancov_pcs_start,
-           (g_sancov_pcs_end - g_sancov_pcs_start) * 8);
+void dump_sancov() {
+  memcpy_s((void *)g_sancov_copy_cntrs_start,
+           g_sancov_copy_cntrs_end - g_sancov_copy_cntrs_start,
+           g_sancov_cntrs_start, g_sancov_cntrs_end - g_sancov_cntrs_start);
+  memcpy_s((void *)g_sancov_copy_pcs_start,
+           (g_sancov_copy_pcs_end - g_sancov_copy_pcs_start) * 8,
+           g_sancov_pcs_start, (g_sancov_pcs_end - g_sancov_pcs_start) * 8);
 }
+
+void sgxsan_ecall_dump_sancov() { dump_sancov(); }
 
 void __sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop) {
   g_sancov_cntrs_start = Start;

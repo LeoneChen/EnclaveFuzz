@@ -1,9 +1,14 @@
 #include "MemAccessMgr.hpp"
+#include "ErrorReport.hpp"
 #include "PoisonCheck.hpp"
 #include "SGXSanRTConfig.h"
 #include <deque>
 #include <sgx_trts.h>
 #include <string.h>
+#include <vector>
+
+void libunwind_backtrace(std::vector<uint64_t> &ret_addrs,
+                         size_t max_collect_count = 0);
 
 #define FUNC_NAME_MAX_LEN 127
 #define CONTROL_FETCH_QUEUE_MAX_SIZE 3
@@ -11,6 +16,8 @@ struct FetchInfo {
   const void *start_addr = nullptr;
   size_t size = 0;
   bool used_to_cmp = false;
+  size_t bt_cnt;
+  uptr bt[50];
 };
 
 class MemAccessMgr {
@@ -55,6 +62,13 @@ public:
       info.start_addr = ptr;
       info.size = size;
       info.used_to_cmp = used_to_cmp;
+      std::vector<uint64_t> bt_vec;
+      libunwind_backtrace(bt_vec);
+      info.bt_cnt = bt_vec.size();
+      if (info.bt_cnt) {
+        memcpy(info.bt, bt_vec.data(),
+               std::min(info.bt_cnt, (size_t)50) * sizeof(uint64_t));
+      }
       m_control_fetchs->push_back(info);
       return;
     } else {
@@ -64,6 +78,9 @@ public:
             RangesOverlap((const char *)control_fetch.start_addr,
                           control_fetch.size, (const char *)ptr, size);
         sgxsan_error(is_overlap, "Detect Double-Fetch Situation\n");
+        ReportDoubleFetch((uptr)ptr, size, (uptr)control_fetch.start_addr,
+                          control_fetch.size, control_fetch.bt,
+                          control_fetch.bt_cnt);
       }
       return;
     }
@@ -80,16 +97,13 @@ __thread bool MemAccessMgr::m_active;
 __thread std::deque<FetchInfo> *MemAccessMgr::m_control_fetchs;
 
 // a list of c wrapper of MemAccessMgr that exported for use
+extern "C" {
 void MemAccessMgrInit() { MemAccessMgr::init(); }
 
 void MemAccessMgrDestroy() { MemAccessMgr::destroy(); }
 
-void MemAccessMgrActive() { MemAccessMgr::active(); }
-
-void MemAccessMgrDeactive() { MemAccessMgr::deactive(); }
-
 void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
-                                  bool used_to_cmp, char *parent_func) {
+                                  bool used_to_cmp) {
   if (ptr == nullptr)
     return;
   if (not is_write) {
@@ -100,4 +114,10 @@ void MemAccessMgrOutEnclaveAccess(const void *ptr, size_t size, bool is_write,
 
 void MemAccessMgrInEnclaveAccess() {
   MemAccessMgr::add_in_enclave_access_cnt();
+}
+
+void _hook_tproxy_head(void) { MemAccessMgr::deactive(); }
+void _hook_tproxy_tail(void) { MemAccessMgr::active(); }
+void _hook_before_ecall() { MemAccessMgr::active(); };
+void _hook_after_ecall() { MemAccessMgr::deactive(); };
 }

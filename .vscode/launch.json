@@ -8,17 +8,19 @@
             "name": "TestApp",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/workdir/wasm-micro-runtime/TestApp",
+            "program": "${workspaceFolder}/workdir/sgxwallet/TestApp",
             "args": [
                 // "./result/seeds",
                 // "-artifact_prefix=./result/crashes/",
-                "./result/crashes/crash-52fdd9dbf6e3856b7b25aaa93a2138609cc872fd",
+                "./result/crashes/crash-25b780a9219ebe8fb0bc9cfb5cc38aaa0d74c7af",
+                "-rss_limit_mb=10240",
+                "-print_coverage=1",
                 // "-runs=0"
                 // "-fork=1",
                 // "-ignore_crashes=1",
             ],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/workdir/wasm-micro-runtime",
+            "cwd": "${workspaceFolder}/workdir/sgxwallet",
             "environment": [
                 {
                     "name": "LD_LIBRARY_PATH",
@@ -27,7 +29,7 @@
             ],
             "externalConsole": false,
             // "MIMode": "gdb",
-            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
+            "miDebuggerPath": "${workspaceFolder}/gdb/sgx-gdb",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",

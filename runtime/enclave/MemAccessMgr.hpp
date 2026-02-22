@@ -9,11 +9,8 @@ extern "C" {
 // A list of C wrapper of MemAccessMgr
 void MemAccessMgrInit();
 void MemAccessMgrDestroy();
-void MemAccessMgrActive();
-void MemAccessMgrDeactive();
 void MemAccessMgrOutEnclaveAccess(const void *start, size_t size, bool is_write,
-                                  bool used_to_cmp = false,
-                                  char *parent_func = nullptr);
+                                  bool used_to_cmp = false);
 void MemAccessMgrInEnclaveAccess();
 
 #if defined(__cplusplus)

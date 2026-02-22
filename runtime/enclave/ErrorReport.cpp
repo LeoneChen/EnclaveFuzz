@@ -1,38 +1,9 @@
 #include "ErrorReport.hpp"
+#include "SGXSanRTTBridge.hpp"
 #include <cstdlib>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string>
-
-// -------------------------- Run-time entry ------------------- {{{1
-// exported functions
-#define ASAN_REPORT_ERROR(type, is_write, size)                                \
-  extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_report_##type##size(     \
-      uptr addr) {                                                             \
-    GET_CALLER_PC_BP_SP;                                                       \
-    ReportGenericError(pc, bp, sp, addr, is_write, size, true);                \
-  }
-
-ASAN_REPORT_ERROR(load, false, 1)
-ASAN_REPORT_ERROR(load, false, 2)
-ASAN_REPORT_ERROR(load, false, 4)
-ASAN_REPORT_ERROR(load, false, 8)
-ASAN_REPORT_ERROR(load, false, 16)
-ASAN_REPORT_ERROR(store, true, 1)
-ASAN_REPORT_ERROR(store, true, 2)
-ASAN_REPORT_ERROR(store, true, 4)
-ASAN_REPORT_ERROR(store, true, 8)
-ASAN_REPORT_ERROR(store, true, 16)
-
-#define ASAN_REPORT_ERROR_N(type, is_write)                                    \
-  extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_report_##type##_n(       \
-      uptr addr, uptr size) {                                                  \
-    GET_CALLER_PC_BP_SP;                                                       \
-    ReportGenericError(pc, bp, sp, addr, is_write, size, true);                \
-  }
-
-ASAN_REPORT_ERROR_N(load, false)
-ASAN_REPORT_ERROR_N(store, true)
 
 void PrintShadowMap(log_level ll, uptr addr) {
   uptr shadowAddr = MEM_TO_SHADOW(addr);
@@ -114,5 +85,19 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   sgxsan_log(ll, false, "================= Report End =================\n");
   if (fatal)
     abort();
+  return;
+}
+
+void ReportDoubleFetch(uptr cur_fetch, size_t cur_size, uptr prev_fetch,
+                       size_t prev_size, uptr *prev_bt, size_t prev_bt_cnt) {
+  log_error_np("\n================ Error Report ================\n"
+               "[SGXSan] ERROR: Double fetch 0x%lx(0x%lx)\n\n",
+               cur_fetch, cur_size);
+  sgxsan_backtrace();
+  log_error_np("\nPreviously fetch 0x%lx(0x%lx)\n\n", prev_fetch, prev_size);
+  sgxsan_ocall_addr2line(prev_bt, prev_bt_cnt, LOG_LEVEL_ERROR);
+  PrintShadowMap(LOG_LEVEL_ERROR, prev_fetch);
+  log_error_np("================= Report End =================\n");
+  abort();
   return;
 }

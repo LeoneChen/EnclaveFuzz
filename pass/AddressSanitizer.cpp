@@ -1,4 +1,3 @@
-// https://github.com/llvm/llvm-project/blob/main/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
 //===- AddressSanitizer.cpp - memory error detector -----------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -16,7 +15,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
-#include "PassUtil.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -27,7 +25,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -67,8 +64,6 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/Pass.h"
-#include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -78,7 +73,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Instrumentation.h"
-#include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizerCommon.h"
 #include "llvm/Transforms/Instrumentation/AddressSanitizerOptions.h"
 #include "llvm/Transforms/Utils/ASanStackFrameLayout.h"
@@ -87,18 +81,15 @@
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include <algorithm>
-#include <assert.h>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
-#include <unordered_set>
 
 using namespace llvm;
 
@@ -144,7 +135,6 @@ static const uint64_t kAsanEmscriptenCtorAndDtorPriority = 50;
 const char kAsanReportErrorTemplate[] = "__asan_report_";
 const char kAsanRegisterGlobalsName[] = "__asan_register_globals";
 const char kAsanUnregisterGlobalsName[] = "__asan_unregister_globals";
-#if 0
 const char kAsanRegisterImageGlobalsName[] = "__asan_register_image_globals";
 const char kAsanUnregisterImageGlobalsName[] =
     "__asan_unregister_image_globals";
@@ -152,14 +142,11 @@ const char kAsanRegisterElfGlobalsName[] = "__asan_register_elf_globals";
 const char kAsanUnregisterElfGlobalsName[] = "__asan_unregister_elf_globals";
 const char kAsanPoisonGlobalsName[] = "__asan_before_dynamic_init";
 const char kAsanUnpoisonGlobalsName[] = "__asan_after_dynamic_init";
-#endif
 const char kAsanInitName[] = "__asan_init";
 const char kAsanVersionCheckNamePrefix[] = "__asan_version_mismatch_check_v";
-#if 0
 const char kAsanPtrCmp[] = "__sanitizer_ptr_cmp";
 const char kAsanPtrSub[] = "__sanitizer_ptr_sub";
 const char kAsanHandleNoReturnName[] = "__asan_handle_no_return";
-#endif
 static const int kMaxAsanStackMallocSizeClass = 10;
 const char kAsanStackMallocNameTemplate[] = "__asan_stack_malloc_";
 const char kAsanStackMallocAlwaysNameTemplate[] = "__asan_stack_malloc_always_";
@@ -184,10 +171,8 @@ const char kAsanShadowMemoryDynamicAddress[] =
 const char kAsanAllocaPoison[] = "__asan_alloca_poison";
 const char kAsanAllocasUnpoison[] = "__asan_allocas_unpoison";
 
-#if 0
 const char kAMDGPUAddressSharedName[] = "llvm.amdgcn.is.shared";
 const char kAMDGPUAddressPrivateName[] = "llvm.amdgcn.is.private";
-#endif
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
 static const size_t kNumberOfAccessSizes = 5;
@@ -459,6 +444,49 @@ struct ShadowMapping {
   bool InGlobal;
 };
 
+Function *getCalledFunctionStripPointerCast(CallInst *CallI) {
+  if (Function *callee = CallI->getCalledFunction()) {
+    return callee;
+  } else if (Value *calledOp = CallI->getCalledOperand()) {
+    if (auto callee = dyn_cast<Function>(calledOp->stripPointerCasts())) {
+      return callee;
+    }
+  }
+  return nullptr;
+}
+
+StringRef getDirectCalleeName(Value *value) {
+  if (auto CI = dyn_cast<CallInst>(value)) {
+    if (auto callee = getCalledFunctionStripPointerCast(CI)) {
+      return callee->getName();
+    }
+  }
+  return "";
+}
+
+SmallVector<User *> getNonCastUsers(Value *value) {
+  SmallVector<User *> users;
+  for (User *user : value->users()) {
+    if (CastInst *CastI = dyn_cast<CastInst>(user)) {
+      users.append(getNonCastUsers(CastI));
+    } else {
+      users.push_back(user);
+    }
+  }
+  return users;
+}
+
+bool hasCmpUser(Value *val) {
+  for (auto user : getNonCastUsers(val)) {
+    auto I = dyn_cast<Instruction>(user);
+    if (I && (I->getOpcode() == Instruction::ICmp ||
+              I->getOpcode() == Instruction::FCmp)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // end anonymous namespace
 
 static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
@@ -592,7 +620,7 @@ static uint64_t GetCtorAndDtorPriority(Triple &TargetTriple) {
   }
 }
 
-namespace llvm {
+namespace {
 
 /// Module analysis for getting various metadata about the module.
 class ASanGlobalsMetadataWrapperPass : public ModulePass {
@@ -699,11 +727,6 @@ struct AddressSanitizer {
   void declareAdditionalSymbol(Module &M);
   /// \brief Instrument \c memset_s/memmove_s/memcpy_s
   void instrumentSecMemIntrinsic(CallInst *CI);
-  /// \brief Instrument \c TDECallConstructor and \c TDECallDestructor at begin
-  /// and end of ecall wrapper respectively
-  void instrumentTDECallMgr(Function *ecallWrapper);
-  bool instrumentRealECall(CallInst *CI);
-  bool instrumentOcallWrapper(Function &OcallWrapper);
 
 private:
   friend struct FunctionStackPoisoner;
@@ -759,15 +782,7 @@ private:
 
   FunctionCallee AMDGPUAddressShared;
   FunctionCallee AMDGPUAddressPrivate;
-
-  FunctionCallee MemAccessMgrActive, MemAccessMgrDeactive,
-      MemAccessMgrOutEnclaveAccess, MemAccessMgrInEnclaveAccess, SGXSanMemcpyS,
-      SGXSanMemsetS, SGXSanMemmoveS, TDECallConstructor, TDECallDestructor,
-      PushOCAllocStack, PopOCAllocStack;
-  std::unordered_set<Function *> TDMgrInstrumentedEcall;
-  Constant *globalFuncName = nullptr;
-  std::map<Type *, bool> typeHasPointerMap;
-  SGXSanInstVisitor mInstVisitor;
+  FunctionCallee SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS;
 };
 
 class AddressSanitizerLegacyPass : public FunctionPass {
@@ -1203,7 +1218,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
                      Instruction *ThenTerm, Value *ValueIfFalse);
 };
 
-} // namespace llvm
+} // end anonymous namespace
 
 void LocationMetadata::parse(MDNode *MDN) {
   assert(MDN->getNumOperands() == 3);
@@ -1785,13 +1800,12 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
 
   if (UseCalls) {
     if (Exp == 0)
-      IRB.CreateCall(
-          AsanMemoryAccessCallback[IsWrite][0][AccessSizeIndex],
-          {AddrLong, IRB.getInt1(hasCmpUser(OrigIns)), globalFuncName});
+      IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][0][AccessSizeIndex],
+                     {AddrLong, IRB.getInt1(hasCmpUser(OrigIns))});
     else
       IRB.CreateCall(AsanMemoryAccessCallback[IsWrite][1][AccessSizeIndex],
                      {AddrLong, IRB.getInt1(hasCmpUser(OrigIns)),
-                      globalFuncName, ConstantInt::get(IRB.getInt32Ty(), Exp)});
+                      ConstantInt::get(IRB.getInt32Ty(), Exp)});
     return;
   }
 
@@ -1846,13 +1860,12 @@ void AddressSanitizer::instrumentUnusualSizeOrAlignment(
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   if (UseCalls) {
     if (Exp == 0)
-      IRB.CreateCall(
-          AsanMemoryAccessCallbackSized[IsWrite][0],
-          {AddrLong, Size, IRB.getInt1(hasCmpUser(I)), globalFuncName});
+      IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite][0],
+                     {AddrLong, Size, IRB.getInt1(hasCmpUser(I))});
     else
       IRB.CreateCall(AsanMemoryAccessCallbackSized[IsWrite][1],
                      {AddrLong, Size, IRB.getInt1(hasCmpUser(I)),
-                      globalFuncName, ConstantInt::get(IRB.getInt32Ty(), Exp)});
+                      ConstantInt::get(IRB.getInt32Ty(), Exp)});
   } else {
     Value *LastByte = IRB.CreateIntToPtr(
         IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, TypeSize / 8 - 1)),
@@ -2697,10 +2710,8 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
       const std::string ExpStr = Exp ? "exp_" : "";
       const std::string EndingStr = Recover ? "_noabort" : "";
 
-      SmallVector<Type *, 5> Args4 = {IntptrTy, IntptrTy, Type::getInt1Ty(*C),
-                                      Type::getInt8PtrTy(*C)};
-      SmallVector<Type *, 4> Args3 = {IntptrTy, Type::getInt1Ty(*C),
-                                      Type::getInt8PtrTy(*C)};
+      SmallVector<Type *, 5> Args4 = {IntptrTy, IntptrTy, Type::getInt1Ty(*C)};
+      SmallVector<Type *, 4> Args3 = {IntptrTy, Type::getInt1Ty(*C)};
       SmallVector<Type *, 3> Args2 = {IntptrTy, IntptrTy};
       SmallVector<Type *, 2> Args1{1, IntptrTy};
       if (Exp) {
@@ -2745,6 +2756,7 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
   AsanMemset = M.getOrInsertFunction(MemIntrinCallbackPrefix + "memset",
                                      IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
                                      IRB.getInt32Ty(), IntptrTy);
+
 #if (0)
   AsanHandleNoReturnFunc =
       M.getOrInsertFunction(kAsanHandleNoReturnName, IRB.getVoidTy());
@@ -2892,9 +2904,6 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   SmallVector<BasicBlock *, 16> AllBlocks;
   SmallVector<Instruction *, 16> PointerComparisonsOrSubtracts;
   SmallVector<CallInst *, 16> SecIntrinToInstrument;
-  // there may be several `tail call` RealEcall when compiling with `-O2`
-  SmallVector<CallInst *, 16> RealEcallInsts;
-  SmallVector<CallInst *, 16> SGXOcallInsts;
   int NumAllocas = 0;
 
   // Fill the set of memory operations to instrument.
@@ -2949,15 +2958,8 @@ bool AddressSanitizer::instrumentFunction(Function &F,
       }
       if (CallInst *CI = dyn_cast<CallInst>(&Inst)) {
         StringRef callee_name = getDirectCalleeName(CI);
-        if (F.getName() ==
-            ("sgx_" /* ecall wrapper prefix */ + callee_name.str())) {
-          // it's an ecall wrapper
-          RealEcallInsts.push_back(CI);
-        } else if (callee_name == "sgx_ocall" or
-                   callee_name == "sgx_ocall_switchless") {
-          SGXOcallInsts.push_back(CI);
-        } else if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
-                   callee_name == "memmove_s") {
+        if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
+            callee_name == "memmove_s") {
           SecIntrinToInstrument.push_back(CI);
         }
       }
@@ -2976,8 +2978,6 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   ObjectSizeOffsetVisitor ObjSizeVis(DL, TLI, F.getContext(), ObjSizeOpts);
 
   // Instrument.
-  IRBuilder<> IRB(*C);
-  globalFuncName = IRB.CreateGlobalStringPtr(F.getName(), "", 0, F.getParent());
   int NumInstrumented = 0;
   for (auto &Operand : OperandsToInstrument) {
     if (!suppressInstrumentationSiteForDebug(NumInstrumented))
@@ -2998,16 +2998,7 @@ bool AddressSanitizer::instrumentFunction(Function &F,
 
   FunctionStackPoisoner FSP(F, *this);
   bool ChangedStack = FSP.runOnFunction();
-  for (auto RealEcallInst : RealEcallInsts) {
-    // when it is an ecall wrapper
-    instrumentRealECall(RealEcallInst);
-    FunctionModified = true;
-  }
 
-  if (SGXOcallInsts.size() > 0) {
-    instrumentOcallWrapper(F);
-    FunctionModified = true;
-  }
 #if (0)
   // We must unpoison the stack before NoReturn calls (throw, _exit, etc).
   // See e.g. https://github.com/google/sanitizers/issues/37
@@ -3738,70 +3729,8 @@ void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI) {
        IRB.CreateIntCast(CI->getOperand(3), IntptrTy, false)}));
   CI->eraseFromParent();
 }
-
-void AddressSanitizer::instrumentTDECallMgr(Function *ecallWrapper) {
-  assert(ecallWrapper);
-  if (TDMgrInstrumentedEcall.count(ecallWrapper) != 0)
-    return;
-
-  IRBuilder<> IRB(&ecallWrapper->front().front());
-  IRB.CreateCall(TDECallConstructor);
-
-  for (auto RetInst :
-       mInstVisitor.visitFunction(*ecallWrapper).BroadReturnInstVec) {
-    IRB.SetInsertPoint(RetInst);
-    IRB.CreateCall(TDECallDestructor);
-  }
-  TDMgrInstrumentedEcall.emplace(ecallWrapper);
-}
-
-bool AddressSanitizer::instrumentRealECall(CallInst *RealECall) {
-  if (RealECall == nullptr)
-    return false;
-
-  instrumentTDECallMgr(RealECall->getFunction());
-
-  /// Instrument \c MemAccessMgrActive before RealEcall, \c MemAccessMgrDeactive
-  /// after RealEcall
-  IRBuilder<> IRB(RealECall);
-  IRB.CreateCall(MemAccessMgrActive);
-  IRB.SetInsertPoint(RealECall->getNextNode());
-  IRB.CreateCall(MemAccessMgrDeactive);
-
-  return true;
-}
-
-bool AddressSanitizer::instrumentOcallWrapper(Function &OcallWrapper) {
-  IRBuilder<> IRB(&OcallWrapper.front().front());
-  IRB.CreateCall(MemAccessMgrDeactive);
-
-  for (auto RetInst :
-       mInstVisitor.visitFunction(OcallWrapper).BroadReturnInstVec) {
-    IRB.SetInsertPoint(RetInst);
-    IRB.CreateCall(MemAccessMgrActive);
-  }
-  return true;
-}
-
 void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   IRBuilder<> IRB(*C);
-
-  // TD ECall Manager
-  TDECallConstructor =
-      M.getOrInsertFunction("TDECallConstructor", IRB.getVoidTy());
-  TDECallDestructor =
-      M.getOrInsertFunction("TDECallDestructor", IRB.getVoidTy());
-
-  // MemAccessMgr functions
-  MemAccessMgrActive =
-      M.getOrInsertFunction("MemAccessMgrActive", IRB.getVoidTy());
-  MemAccessMgrDeactive =
-      M.getOrInsertFunction("MemAccessMgrDeactive", IRB.getVoidTy());
-  MemAccessMgrOutEnclaveAccess = M.getOrInsertFunction(
-      "MemAccessMgrOutEnclaveAccess", IRB.getVoidTy(), IRB.getInt8PtrTy(),
-      IntptrTy, IRB.getInt1Ty(), IRB.getInt1Ty(), IRB.getInt8PtrTy());
-  MemAccessMgrInEnclaveAccess =
-      M.getOrInsertFunction("MemAccessMgrInEnclaveAccess", IRB.getVoidTy());
 
   // Hooked security version memory intrinsics
   SGXSanMemcpyS = M.getOrInsertFunction("__sgxsan_memcpy_s", IRB.getInt32Ty(),
@@ -3813,42 +3742,6 @@ void AddressSanitizer::declareAdditionalSymbol(Module &M) {
   SGXSanMemmoveS = M.getOrInsertFunction("__sgxsan_memmove_s", IRB.getInt32Ty(),
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty(),
                                          IRB.getInt8PtrTy(), IRB.getInt64Ty());
-}
-
-bool adjustUntrustedSPRegisterAtOcallAllocAndFree(Function &F) {
-  static SGXSanInstVisitor IV;
-  // initialize
-  Module *M = F.getParent();
-  IRBuilder<> IRB(M->getContext());
-  FunctionCallee SetUSP = M->getOrInsertFunction(
-      "set_untrust_sp", IRB.getVoidTy(), IRB.getInt64Ty());
-  FunctionCallee GetUSP =
-      M->getOrInsertFunction("get_untrust_sp", IRB.getInt64Ty());
-
-  // get interesting callinst
-  SmallVector<CallInst *> OcallocVec, OcfreeVec,
-      CallInstVec = IV.visitFunction(F).CallInstVec;
-  for (auto CI : CallInstVec) {
-    StringRef callee_name = getDirectCalleeName(CI);
-    if (callee_name == "sgx_ocalloc") {
-      OcallocVec.push_back(CI);
-    } else if (callee_name == "sgx_ocfree") {
-      OcfreeVec.push_back(CI);
-    }
-  }
-
-  // instrument
-  IRB.SetInsertPoint(&F.front().front());
-  Value *usp = IRB.CreateAlloca(IRB.getInt64Ty());
-  for (auto CI : OcallocVec) {
-    IRB.SetInsertPoint(CI);
-    IRB.CreateStore(IRB.CreateCall(GetUSP), usp);
-  }
-  for (auto CI : OcfreeVec) {
-    IRB.SetInsertPoint(CI->getNextNode());
-    IRB.CreateCall(SetUSP, IRB.CreateLoad(IRB.getInt64Ty(), usp));
-  }
-  return true;
 }
 
 namespace {
@@ -3872,15 +3765,8 @@ struct SGXSanLegacyPass : public ModulePass {
       if (F.isDeclaration())
         continue;
 
-      if (F.getName().startswith("sgxsan_ocall_") ||
-          F.getName().startswith("sgx_sgxsan_ecall_") ||
-          F.getName().startswith("fuzzer_ocall_") ||
-          F.getName().startswith("sgx_fuzzer_ecall_")) {
-        Changed |= adjustUntrustedSPRegisterAtOcallAllocAndFree(F);
-        // Since we have monitored malloc-serial function, (linkonce_odr type
-        // function) in library which will check shadowbyte whether instrumented
-        // or not is not necessary. don't call instrumentFunction()
-      } else {
+      if (!(F.getName().startswith("sgxsan_ocall_") ||
+            F.getName().startswith("sgx_sgxsan_ecall_"))) {
         const TargetLibraryInfo *TLI =
             &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F);
         // hook sgx-specifical callee, normal asan, elrange check, Out-Addr

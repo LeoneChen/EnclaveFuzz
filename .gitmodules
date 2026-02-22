@@ -19,3 +19,6 @@
 [submodule "EnclavePatch-Data"]
 	path = EnclavePatch-Data
 	url = git@github.com:LeoneChen/EnclavePatch-Data.git
+[submodule "sgx_apps/sgxwallet"]
+	path = sgx_apps/sgxwallet
+	url = git@github.com:LeoneChen/sgxwallet.git

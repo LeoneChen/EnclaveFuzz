@@ -6,7 +6,7 @@
 
 #define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                      \
   extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##size(            \
-      uptr addr, bool used_to_cmp, char *parent_func) {                        \
+      uptr addr, bool used_to_cmp) {                                           \
     if (UNLIKELY(not AddrIsInMem(addr))) {                                     \
       GET_CALLER_PC_BP_SP;                                                     \
       ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
@@ -26,8 +26,7 @@
     SGXSAN_ELRANGE_CHECK_BEG(addr, size)                                       \
     MemAccessMgrInEnclaveAccess();                                             \
     SGXSAN_ELRANGE_CHECK_MID                                                   \
-    MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, used_to_cmp,    \
-                                 parent_func);                                 \
+    MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, used_to_cmp);   \
     SGXSAN_ELRANGE_CHECK_END;                                                  \
   }
 
@@ -44,7 +43,7 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
 
 #define ASAN_MEMORY_ACCESS_CALLBACK_N(type, is_write)                          \
   extern "C" NOINLINE INTERFACE_ATTRIBUTE void __asan_##type##N(               \
-      uptr addr, uptr size, bool used_to_cmp, char *parent_func) {             \
+      uptr addr, uptr size, bool used_to_cmp) {                                \
     if (UNLIKELY(not AddrIsInMem(addr))) {                                     \
       GET_CALLER_PC_BP_SP;                                                     \
       ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
@@ -57,8 +56,7 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
     SGXSAN_ELRANGE_CHECK_BEG(addr, size)                                       \
     MemAccessMgrInEnclaveAccess();                                             \
     SGXSAN_ELRANGE_CHECK_MID                                                   \
-    MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, used_to_cmp,    \
-                                 parent_func);                                 \
+    MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, used_to_cmp);   \
     SGXSAN_ELRANGE_CHECK_END;                                                  \
   }
 

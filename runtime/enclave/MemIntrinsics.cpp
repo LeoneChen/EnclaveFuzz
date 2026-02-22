@@ -20,7 +20,7 @@
     SGXSAN_ELRANGE_CHECK_BEG(beg, size)                                        \
     MemAccessMgrInEnclaveAccess();                                             \
     SGXSAN_ELRANGE_CHECK_MID                                                   \
-    MemAccessMgrOutEnclaveAccess(beg, size, is_write, false, nullptr);         \
+    MemAccessMgrOutEnclaveAccess(beg, size, is_write, false);                  \
     SGXSAN_ELRANGE_CHECK_END;                                                  \
   } while (0);
 
@@ -30,7 +30,6 @@ void *__asan_memcpy(void *dst, const void *src, uptr size) {
     return dst;
   }
   if (LIKELY(asan_inited)) {
-    ENSURE_ASAN_INITED();
     if (dst != src) {
       sgxsan_error(
           RangesOverlap((const char *)dst, size, (const char *)src, size),
@@ -51,8 +50,6 @@ void *__asan_memset(void *dst, int c, uptr size) {
     return dst;
   }
   if (LIKELY(asan_inited)) {
-    ENSURE_ASAN_INITED();
-
     ASAN_WRITE_RANGE(dst, size);
     RANGE_CHECK(dst, size, true);
   }
@@ -64,8 +61,6 @@ void *__asan_memmove(void *dst, const void *src, uptr size) {
     return dst;
   }
   if (LIKELY(asan_inited)) {
-    ENSURE_ASAN_INITED();
-
     ASAN_READ_RANGE(src, size);
     RANGE_CHECK(src, size, false);
 
@@ -81,7 +76,6 @@ errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
     return 0;
   }
   if (LIKELY(asan_inited)) {
-    ENSURE_ASAN_INITED();
     if (dst != src) {
       sgxsan_error(
           RangesOverlap((const char *)dst, dstSize, (const char *)src, count),
@@ -103,8 +97,6 @@ errno_t __sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t count) {
     return 0;
   }
   if (LIKELY(asan_inited)) {
-    ENSURE_ASAN_INITED();
-
     ASAN_WRITE_RANGE(dst, std::max(dstSize, count));
     RANGE_CHECK(dst, std::max(dstSize, count), true);
   }
@@ -117,8 +109,6 @@ int __sgxsan_memmove_s(void *dst, size_t dstSize, const void *src,
     return 0;
   }
   if (LIKELY(asan_inited)) {
-    ENSURE_ASAN_INITED();
-
     ASAN_READ_RANGE(src, count);
     RANGE_CHECK(src, count, false);
 
