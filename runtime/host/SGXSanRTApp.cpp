@@ -25,6 +25,7 @@ extern "C" {
 void __sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop);
 void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
                               const uintptr_t *pcs_end);
+int __sanitizer_acquire_crash_state();
 }
 
 // Cache for symbolization results
@@ -71,14 +72,20 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
   if (ll > g_log_level)
     return;
 
+  char buf[1024];
+  int pos = 0;
   if (with_prefix) {
-    fprintf(stderr, "%s", log_level_to_prefix[ll]);
+    pos = snprintf(buf, sizeof(buf), "%s", log_level_to_prefix[ll]);
   }
 
   va_list ap;
   va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
+  pos += vsnprintf(buf + pos, sizeof(buf) - pos, fmt, ap);
   va_end(ap);
+
+  if (pos > (int)sizeof(buf))
+    pos = sizeof(buf);
+  write(STDERR_FILENO, buf, pos);
 }
 
 void PrintAddressSpaceLayout() {
@@ -404,6 +411,11 @@ void sancov_copy_init() {
 }
 
 // void __sanitizer_print_stack_trace() { sgxsan_backtrace(LOG_LEVEL_ERROR); }
+
+int __sanitizer_acquire_crash_state() {
+  static volatile int in_crash_state = 0;
+  return !__atomic_exchange_n(&in_crash_state, 1, __ATOMIC_RELAXED);
+}
 
 void ClearSymbolizeCache() { symbolize_cache.clear(); }
 void __sanitizer_symbolize_pc(uptr pc, const char *fmt, char *out_buf,

@@ -5,6 +5,25 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Attach TestApp",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/workdir/sgxwallet/TestApp",
+            "miDebuggerPath": "${workspaceFolder}/gdb/sgx-gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
             "name": "TestApp",
             "type": "cppdbg",
             "request": "launch",
@@ -12,7 +31,7 @@
             "args": [
                 // "./result/seeds",
                 // "-artifact_prefix=./result/crashes/",
-                "./result/crashes/crash-25b780a9219ebe8fb0bc9cfb5cc38aaa0d74c7af",
+                "./result/crashes/crash-8bf7b464aaa2c2b536aa1d76a1297c19155f5603",
                 "-rss_limit_mb=10240",
                 "-print_coverage=1",
                 // "-runs=0"
@@ -28,7 +47,6 @@
                 }
             ],
             "externalConsole": false,
-            // "MIMode": "gdb",
             "miDebuggerPath": "${workspaceFolder}/gdb/sgx-gdb",
             "setupCommands": [
                 {

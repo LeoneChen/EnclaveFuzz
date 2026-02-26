@@ -724,9 +724,8 @@ struct AddressSanitizer {
   bool maybeInsertAsanInitAtFunctionEntry(Function &F);
   bool maybeInsertDynamicShadowAtFunctionEntry(Function &F);
   void markEscapedLocalAllocas(Function &F);
-  void declareAdditionalSymbol(Module &M);
-  /// \brief Instrument \c memset_s/memmove_s/memcpy_s
-  void instrumentSecMemIntrinsic(CallInst *CI);
+  /// \brief Instrument hooked library calls (memcpy_s, snprintf, etc.)
+  void instrumentHookedCall(CallInst *CI);
 
 private:
   friend struct FunctionStackPoisoner;
@@ -782,7 +781,6 @@ private:
 
   FunctionCallee AMDGPUAddressShared;
   FunctionCallee AMDGPUAddressPrivate;
-  FunctionCallee SGXSanMemcpyS, SGXSanMemsetS, SGXSanMemmoveS;
 };
 
 class AddressSanitizerLegacyPass : public FunctionPass {
@@ -2774,7 +2772,6 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
   AMDGPUAddressPrivate = M.getOrInsertFunction(
       kAMDGPUAddressPrivateName, IRB.getInt1Ty(), IRB.getInt8PtrTy());
 #endif
-  declareAdditionalSymbol(M);
 }
 
 bool AddressSanitizer::maybeInsertAsanInitAtFunctionEntry(Function &F) {
@@ -2903,7 +2900,7 @@ bool AddressSanitizer::instrumentFunction(Function &F,
   SmallVector<Instruction *, 8> NoReturnCalls;
   SmallVector<BasicBlock *, 16> AllBlocks;
   SmallVector<Instruction *, 16> PointerComparisonsOrSubtracts;
-  SmallVector<CallInst *, 16> SecIntrinToInstrument;
+  SmallVector<CallInst *, 16> HookedCallsToInstrument;
   int NumAllocas = 0;
 
   // Fill the set of memory operations to instrument.
@@ -2958,9 +2955,36 @@ bool AddressSanitizer::instrumentFunction(Function &F,
       }
       if (CallInst *CI = dyn_cast<CallInst>(&Inst)) {
         StringRef callee_name = getDirectCalleeName(CI);
-        if (callee_name == "memcpy_s" || callee_name == "memset_s" ||
-            callee_name == "memmove_s") {
-          SecIntrinToInstrument.push_back(CI);
+        // Check if this is a memory/string function that needs hooking
+        bool needsHooking =
+            // Safe memory functions (_s variants from Microsoft/Intel SafeCRT)
+            callee_name == "memcpy_s" || callee_name == "memset_s" ||
+            callee_name == "memmove_s" ||
+            // Fixed-size memory operations
+            callee_name == "memcmp" || callee_name == "memchr" ||
+            callee_name == "bcmp" ||
+            // Fixed-size string operations
+            callee_name == "strncpy" || callee_name == "strlcpy" ||
+            callee_name == "strncmp" || callee_name == "strnlen" ||
+            callee_name == "strncat" || callee_name == "stpncpy" ||
+            callee_name == "strndup" ||
+            // BSD/Legacy memory operations
+            callee_name == "bzero" || callee_name == "bcopy" ||
+            callee_name == "mempcpy" ||
+            // Safe string functions (_s variants)
+            callee_name == "strcpy_s" || callee_name == "strncpy_s" ||
+            callee_name == "strcat_s" || callee_name == "strncat_s" ||
+            // Formatting functions
+            callee_name == "snprintf" || callee_name == "vsnprintf" ||
+            callee_name == "sprintf_s" || callee_name == "_snprintf_s" ||
+            // NUL-terminated string operations
+            callee_name == "strlen" || callee_name == "strcmp" ||
+            callee_name == "strchr" || callee_name == "strrchr" ||
+            callee_name == "strstr" || callee_name == "strspn" ||
+            callee_name == "strcspn" || callee_name == "strpbrk";
+
+        if (needsHooking) {
+          HookedCallsToInstrument.push_back(CI);
         }
       }
       if (NumInsnsPerBB >= ClMaxInsnsToInstrumentPerBB)
@@ -2990,9 +3014,9 @@ bool AddressSanitizer::instrumentFunction(Function &F,
       instrumentMemIntrinsic(Inst);
     FunctionModified = true;
   }
-  for (auto CI : SecIntrinToInstrument) {
+  for (auto CI : HookedCallsToInstrument) {
     if (!suppressInstrumentationSiteForDebug(NumInstrumented))
-      instrumentSecMemIntrinsic(CI);
+      instrumentHookedCall(CI);
     FunctionModified = true;
   }
 
@@ -3707,41 +3731,14 @@ bool AddressSanitizer::isSafeAccess(ObjectSizeOffsetVisitor &ObjSizeVis,
          Size - uint64_t(Offset) >= TypeSize / 8;
 }
 
-void AddressSanitizer::instrumentSecMemIntrinsic(CallInst *CI) {
-  StringRef callee_name = getDirectCalleeName(CI);
-  IRBuilder<> IRB(CI);
-  FunctionCallee *hookWrapper = nullptr;
-  if (callee_name == "memcpy_s") {
-    hookWrapper = &SGXSanMemcpyS;
-  } else if (callee_name == "memset_s") {
-    hookWrapper = &SGXSanMemsetS;
-  } else if (callee_name == "memmove_s") {
-    hookWrapper = &SGXSanMemmoveS;
-  } else
-    abort();
-  CI->replaceAllUsesWith(IRB.CreateCall(
-      *hookWrapper,
-      {IRB.CreatePointerCast(CI->getOperand(0), IRB.getInt8PtrTy()),
-       IRB.CreateIntCast(CI->getOperand(1), IntptrTy, false),
-       callee_name == "memset_s"
-           ? IRB.CreateIntCast(CI->getOperand(2), IRB.getInt32Ty(), true)
-           : IRB.CreatePointerCast(CI->getOperand(2), IRB.getInt8PtrTy()),
-       IRB.CreateIntCast(CI->getOperand(3), IntptrTy, false)}));
-  CI->eraseFromParent();
-}
-void AddressSanitizer::declareAdditionalSymbol(Module &M) {
-  IRBuilder<> IRB(*C);
-
-  // Hooked security version memory intrinsics
-  SGXSanMemcpyS = M.getOrInsertFunction("__sgxsan_memcpy_s", IRB.getInt32Ty(),
-                                        IRB.getInt8PtrTy(), IRB.getInt64Ty(),
-                                        IRB.getInt8PtrTy(), IRB.getInt64Ty());
-  SGXSanMemsetS = M.getOrInsertFunction("__sgxsan_memset_s", IRB.getInt32Ty(),
-                                        IRB.getInt8PtrTy(), IRB.getInt64Ty(),
-                                        IRB.getInt32Ty(), IRB.getInt64Ty());
-  SGXSanMemmoveS = M.getOrInsertFunction("__sgxsan_memmove_s", IRB.getInt32Ty(),
-                                         IRB.getInt8PtrTy(), IRB.getInt64Ty(),
-                                         IRB.getInt8PtrTy(), IRB.getInt64Ty());
+void AddressSanitizer::instrumentHookedCall(CallInst *CI) {
+  Function *Callee = getCalledFunctionStripPointerCast(CI);
+  assert(Callee && "instrumentHookedCall: callee must be a direct function");
+  StringRef callee_name = Callee->getName();
+  std::string wrapper_name = ("__sgxsan_" + callee_name).str();
+  FunctionCallee Wrapper = CI->getModule()->getOrInsertFunction(
+      wrapper_name, Callee->getFunctionType());
+  CI->setCalledFunction(Wrapper);
 }
 
 namespace {

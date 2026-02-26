@@ -3,21 +3,20 @@
 #include <cstdlib>
 #include <stdarg.h>
 #include <stdio.h>
-#include <string>
 
 void PrintShadowMap(log_level ll, uptr addr) {
   uptr shadowAddr = MEM_TO_SHADOW(addr);
   uptr shadowAddrRow = RoundDownTo(shadowAddr, 0x10);
   int shadowAddrCol = (int)(shadowAddr - shadowAddrRow);
-  char buf[BUFSIZ];
-  snprintf(buf, BUFSIZ, "Shadow bytes around the buggy address:\n");
-  std::string str = buf;
+  sgxsan_log(ll, false, "Shadow bytes around the buggy address:\n");
   for (int i = 0; i <= 10; i++) {
-    snprintf(buf, BUFSIZ, "%s%p:", i == 5 ? "=>" : "  ",
-             (void *)(shadowAddrRow - 0x50 + 0x10 * i));
-    str += buf;
+    // line buffer: "=>0xADDRESS: [xx xx ... xx] \n" — 128 bytes is plenty
+    char line[128];
+    int pos = snprintf(line, sizeof(line), "%s%p:", i == 5 ? "=>" : "  ",
+                       (void *)(shadowAddrRow - 0x50 + 0x10 * i));
     for (int j = 0; j < 16; j++) {
-      std::string prefix = " ", appendix = "";
+      const char *prefix = " ";
+      const char *appendix = "";
       if (i == 5) {
         if (j == shadowAddrCol) {
           prefix = "[";
@@ -27,14 +26,14 @@ void PrintShadowMap(log_level ll, uptr addr) {
         } else if (j == shadowAddrCol + 1)
           prefix = "]";
       }
-      snprintf(buf, BUFSIZ, "%s%02x%s", prefix.c_str(),
-               *(uint8_t *)(shadowAddrRow - 0x50 + 0x10 * i + j),
-               appendix.c_str());
-      str += buf;
+      pos +=
+          snprintf(line + pos, sizeof(line) - pos, "%s%02x%s", prefix,
+                   *(uint8_t *)(shadowAddrRow - 0x50 + 0x10 * i + j), appendix);
     }
-    str += " \n";
+    sgxsan_log(ll, false, "%s \n", line);
   }
-  str +=
+  sgxsan_log(
+      ll, false,
       "Shadow byte legend (one shadow byte represents 8 application bytes):\n"
       "  Addressable:           00\n"
       "  Partially addressable: 01 02 03 04 05 06 07\n"
@@ -52,8 +51,7 @@ void PrintShadowMap(log_level ll, uptr addr) {
       "  Global redzone:        f9\n"
       "  Global init order:     f6\n"
       "  Poisoned by user:      f7\n"
-      "  ASan internal:         fe\n";
-  sgxsan_log(ll, false, str.c_str());
+      "  ASan internal:         fe\n");
 }
 
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,

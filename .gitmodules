@@ -22,3 +22,6 @@
 [submodule "sgx_apps/sgxwallet"]
 	path = sgx_apps/sgxwallet
 	url = git@github.com:LeoneChen/sgxwallet.git
+[submodule "sgx_apps/SampleSGXSan"]
+	path = sgx_apps/SampleSGXSan
+	url = git@github.com:LeoneChen/SampleSGXSan.git

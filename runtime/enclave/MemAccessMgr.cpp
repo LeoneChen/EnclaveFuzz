@@ -5,10 +5,8 @@
 #include <deque>
 #include <sgx_trts.h>
 #include <string.h>
-#include <vector>
 
-void libunwind_backtrace(std::vector<uint64_t> &ret_addrs,
-                         size_t max_collect_count = 0);
+size_t libunwind_backtrace(uint64_t *ret_addrs, size_t max_count);
 
 #define FUNC_NAME_MAX_LEN 127
 #define CONTROL_FETCH_QUEUE_MAX_SIZE 3
@@ -62,12 +60,10 @@ public:
       info.start_addr = ptr;
       info.size = size;
       info.used_to_cmp = used_to_cmp;
-      std::vector<uint64_t> bt_vec;
-      libunwind_backtrace(bt_vec);
-      info.bt_cnt = bt_vec.size();
+      uint64_t bt_buffer[50];
+      info.bt_cnt = libunwind_backtrace(bt_buffer, 50);
       if (info.bt_cnt) {
-        memcpy(info.bt, bt_vec.data(),
-               std::min(info.bt_cnt, (size_t)50) * sizeof(uint64_t));
+        memcpy(info.bt, bt_buffer, info.bt_cnt * sizeof(uint64_t));
       }
       m_control_fetchs->push_back(info);
       return;

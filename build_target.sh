@@ -73,7 +73,7 @@ case "${TARGET_NAME}" in
         BUILD_DIR=${PROJ_DIR}/build/${TARGET_NAME}
         INSTALL_DIR=${PROJ_DIR}/install/${TARGET_NAME}
         ;;
-    "wasm-micro-runtime"|"sgxwallet"|"SGX_SQLite"|"ehsm"|"sgx-reencrypt"|"sgx-wallet"|"SGXCryptoFile"|"mbedtls-SGX"|"TaLoS")
+    "wasm-micro-runtime"|"sgxwallet"|"SGX_SQLite"|"ehsm"|"sgx-reencrypt"|"sgx-wallet"|"SGXCryptoFile"|"mbedtls-SGX"|"TaLoS"|"SampleSGXSan")
         TARGET_DIR=${PROJ_DIR}/sgx_apps/${TARGET_NAME}
         BUILD_DIR="InProject"
         INSTALL_DIR="InProject"
@@ -168,11 +168,11 @@ if [ ${BUILD} -eq 1 ]; then
                 else
                     DEBUG_FLAG=" -O2"
                 fi
-                ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz --enable-sgx-simulation CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
+                ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
                 make -j${JOBS}
             popd
             ;;
-        "SGX_SQLite"|"sgx-reencrypt"|"sgx-wallet"|"SGXCryptoFile")
+        "SGX_SQLite"|"sgx-reencrypt"|"sgx-wallet"|"SGXCryptoFile"|"SampleSGXSan")
             pushd ${TARGET_DIR}
                 make clean
                 if [ ${DEBUG} -eq 1 ]; then
@@ -278,6 +278,11 @@ if [ ${SETUP} -eq 1 ]; then
         "TaLoS")
             pushd ${TARGET_DIR}
                 ${PROJ_DIR}/script/setup.sh --app crypto/link --enclave crypto/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 10
+            popd
+            ;;
+        "SampleSGXSan")
+            pushd ${TARGET_DIR}
+                ${PROJ_DIR}/script/setup.sh --app app --enclave enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         *)
