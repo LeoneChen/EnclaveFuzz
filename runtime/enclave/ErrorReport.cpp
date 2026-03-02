@@ -82,7 +82,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");
   if (fatal)
-    abort();
+    sgxsan_abort();
   return;
 }
 
@@ -96,6 +96,6 @@ void ReportDoubleFetch(uptr cur_fetch, size_t cur_size, uptr prev_fetch,
   sgxsan_ocall_addr2line(prev_bt, prev_bt_cnt, LOG_LEVEL_ERROR);
   PrintShadowMap(LOG_LEVEL_ERROR, prev_fetch);
   log_error_np("================= Report End =================\n");
-  abort();
+  sgxsan_abort();
   return;
 }

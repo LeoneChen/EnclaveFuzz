@@ -46,7 +46,6 @@ size_t libunwind_backtrace(uint64_t *ret_addrs, size_t max_count) {
 }
 
 void sgxsan_backtrace(log_level ll) {
-  dump_sancov();
   uint64_t ret_addrs[kMaxStackFrames];
   size_t count = libunwind_backtrace(ret_addrs, kMaxStackFrames);
   if (count > 0) {

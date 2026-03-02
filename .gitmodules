@@ -6,7 +6,7 @@
 	url = git@github.com:LeoneChen/intel-sgx-ssl.git
 [submodule "third_party/llvm-project"]
 	path = third_party/llvm-project
-	url = git@github.com:llvm/llvm-project.git
+	url = git@github.com:LeoneChen/llvm-project.git
 [submodule "third_party/edger8r"]
 	path = third_party/edger8r
 	url = git@github.com:LeoneChen/edger8r.git
@@ -25,3 +25,6 @@
 [submodule "sgx_apps/SampleSGXSan"]
 	path = sgx_apps/SampleSGXSan
 	url = git@github.com:LeoneChen/SampleSGXSan.git
+[submodule "sgx_apps/mobilecoin"]
+	path = sgx_apps/mobilecoin
+	url = git@github.com:mobilecoinfoundation/mobilecoin.git

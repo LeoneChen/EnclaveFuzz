@@ -1,16 +1,18 @@
 CompileFlags:
     Add: [
-        -I/home/leone/EnclaveFuzz1/pass,
-        -I/home/leone/EnclaveFuzz1/runtime/,
-        -I/home/leone/EnclaveFuzz1/runtime/enclave,
-        -I/home/leone/EnclaveFuzz1/runtime/host,
-        -I/home/leone/EnclaveFuzz1/third_party/llvm-project/compiler-rt/include/fuzzer,
-        -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/common/inc,
-        -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/common/inc/internal,
-        -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/common/inc/tlibc/,
-        -I/home/leone/EnclaveFuzz1/third_party/linux-sgx/sdk/trts,
-        -I/usr/include/llvm-13/,
-        -I/usr/lib/llvm-13/include,
-        -I/usr/lib/llvm-13/lib/clang/13.0.1/include/fuzzer,
-        -I/home/leone/EnclaveFuzz1/sgx_apps/SampleSGXSan/Include/,
+        # EnclaveFuzz
+        -I/home/leone/EnclaveFuzz/runtime/,
+        -I/home/leone/EnclaveFuzz/runtime/enclave,
+        -I/home/leone/EnclaveFuzz/runtime/host,
+        # llvm-project
+        -I/home/leone/EnclaveFuzz/third_party/llvm-project/compiler-rt/include/fuzzer,
+        -I/home/leone/EnclaveFuzz/third_party/llvm-project/llvm/include,
+        -I/home/leone/EnclaveFuzz/install/llvm-project/include/,
+        # linux-sgx
+        -I/home/leone/EnclaveFuzz/third_party/linux-sgx/common/inc,
+        -I/home/leone/EnclaveFuzz/third_party/linux-sgx/common/inc/internal,
+        -I/home/leone/EnclaveFuzz/third_party/linux-sgx/common/inc/tlibc/,
+        -I/home/leone/EnclaveFuzz/third_party/linux-sgx/sdk/trts,
+        # SampleSGXSan
+        # -I/home/leone/EnclaveFuzz/sgx_apps/SampleSGXSan/Include/,
     ]

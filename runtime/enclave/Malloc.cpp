@@ -215,6 +215,6 @@ size_t tc_malloc_size(void *ptr) {
   // dummy, should replaced by real tc_malloc_size when libsgx_tcmalloc.a is
   // loaded
   (void)ptr;
-  abort();
+  sgxsan_error(true, "Unsupported tc_malloc_size\n");
   return 0;
 }

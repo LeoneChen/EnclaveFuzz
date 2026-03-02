@@ -79,6 +79,7 @@ extern "C" {
 #endif
 
 void sgxsan_backtrace(log_level ll = LOG_LEVEL_ERROR);
+void sgxsan_abort();
 
 #if defined(__cplusplus)
 }
@@ -117,7 +118,7 @@ typedef signed long long s64;
     if (!!(cond)) {                                                            \
       log_error(__VA_ARGS__);                                                  \
       sgxsan_backtrace();                                                      \
-      abort();                                                                 \
+      sgxsan_abort();                                                          \
     }                                                                          \
   } while (0);
 

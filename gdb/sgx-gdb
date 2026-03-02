@@ -35,15 +35,7 @@ shopt -s expand_aliases
 SGX_LIBRARY_PATH=/opt/intel/sgxsdk/lib64
 GDB_SGX_PLUGIN_PATH=$SGX_LIBRARY_PATH/gdb-sgx-plugin
 
-if [ -f /usr/local/bin/gdb ]
-then
-    GDB=/usr/local/bin/gdb
-elif [ -f /usr/bin/gdb ]
-then
-    GDB=/usr/bin/gdb
-else
-    GDB=gdb
-fi
+GDB=/home/leone/.cargo/bin/rust-gdb
 
 export PYTHONPATH=$GDB_SGX_PLUGIN_PATH
 LD_PRELOAD=$SGX_LIBRARY_PATH/libsgx_ptrace.so $GDB -iex "directory $GDB_SGX_PLUGIN_PATH" -iex "source $GDB_SGX_PLUGIN_PATH/gdb_sgx_plugin.py" -iex "set environment LD_PRELOAD" -iex "add-auto-load-safe-path /usr/lib" -iex "source $GDB_SGX_PLUGIN_PATH/printers.py" -iex "python register_libcxx_printer_loader()" -ex "set breakpoint pending on" "$@"

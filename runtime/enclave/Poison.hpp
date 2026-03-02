@@ -81,7 +81,7 @@ static inline void PoisonShadow(uptr addr, size_t size, uint8_t value) {
       // as addressable
       *shadowEnd = std::max(origValue, (int8_t)remained);
     } else {
-      abort();
+      sgxsan_error(true, "Unsupported poison value (%x)", value);
     }
   }
 }

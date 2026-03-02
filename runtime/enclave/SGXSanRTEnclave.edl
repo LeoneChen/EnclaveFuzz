@@ -5,10 +5,6 @@ enclave {
     include "stdint.h"
     include "stdbool.h"
 
-    trusted {
-        public void sgxsan_ecall_dump_sancov();
-    };
-
     untrusted {
         void sgxsan_ocall_init_shadow_memory(uint64_t enclave_base, uint64_t enclave_size, [out] uint64_t *cntrs_copy_start, [out] uint64_t *cntrs_copy_end, [out] uint64_t *pcs_copy_start, [out] uint64_t *pcs_copy_end);
         void sgxsan_ocall_print_string([in, string] const char *str);

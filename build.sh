@@ -9,10 +9,8 @@ IS_DEBUG=0
 PREPARE_SDK=0
 BUILD_SDK=0
 
-# MY_CC=${PROJ_DIR}/install/llvm-project/bin/clang
-# MY_CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
-MY_CC=clang-13
-MY_CXX=clang++-13
+MY_CC=${PROJ_DIR}/install/llvm-project/bin/clang
+MY_CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
 
 JOBS=$(nproc)
 
@@ -63,8 +61,7 @@ done
 
 INSTALL_DIR=${PROJ_DIR}/install/enclave_fuzz
 COMMON_COMPILE_FLAGS+=" -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes"
-ENCLAVE_COMPILE_FLAGS+=" -fno-discard-value-names -flegacy-pass-manager -Xclang -load -Xclang ${INSTALL_DIR}/lib64/libSGXSanPass.so"
-# ENCLAVE_COMPILE_FLAGS+=" -fsanitize-coverage=inline-8bit-counters,bb,no-prune,pc-table,trace-cmp"
+ENCLAVE_COMPILE_FLAGS+=" -fsanitize=address -mllvm -asan-enclave -mllvm -asan-use-after-return=never -fsanitize-coverage=inline-8bit-counters,pc-table"
 
 
 echo "[+] CC: ${MY_CC}"
@@ -126,7 +123,7 @@ if [ ${BUILD_SDK} -eq 1 ]; then
         echo "== Get $2 =="
         pushd $1
             make clean -s
-            make -j${JOBS} -s
+            make -j${JOBS} -s COMMON_FLAGS="${COMMON_COMPILE_FLAGS}"
             cp $2 ${INSTALL_DIR}/lib64
         popd
     }
@@ -167,6 +164,7 @@ if [ ${BUILD_SDK} -eq 1 ]; then
     make clean -s -C ${SGXSDK_DIR}/sdk/cpprt
     make -C ${SGXSDK_DIR}/sdk tcxx -j${JOBS} COMMON_FLAGS="${COMMON_COMPILE_FLAGS}"
     cp ${SGXSDK_DIR}/build/linux/libsgx_tcxx.a ${INSTALL_DIR}/lib64/
+    cp ${SGXSDK_DIR}/build/linux/libsgx_tcxx.a ${INSTALL_DIR}/lib64/libsgx_tstdcxx.a
 
     echo "== Get libsgx_tstdc.a =="
     rm -f ${SGXSDK_DIR}/build/linux/libsgx_tstdc.a

@@ -29,7 +29,6 @@ FuzzedDataProvider *g_fdp = nullptr;
 std::vector<uint8_t *> g_alloc_mgr;
 
 extern "C" {
-sgx_status_t sgxsan_ecall_dump_sancov(sgx_enclave_id_t eid);
 
 void customized_init();
 void customized_harness();
@@ -63,7 +62,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
   customized_harness();
 
-  sgxsan_ecall_dump_sancov(__g_harness_eid);
   if (sgx_destroy_enclave(__g_harness_eid) != SGX_SUCCESS) {
     fprintf(stderr, "[!] sgx_destroy_enclave fail");
     abort();

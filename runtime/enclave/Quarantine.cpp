@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 
-QuarantineQueueTy *QuarantineCache::m_queue;
+QuarantineQueue *QuarantineCache::m_queue;
 size_t QuarantineCache::m_quarantine_cache_used_size;
 size_t QuarantineCache::m_quarantine_cache_max_size;
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -14,9 +14,9 @@ void QuarantineCacheDestroy() { QuarantineCache::destory(); }
 
 void QuarantineCache::init() {
   sgxsan_assert(m_queue == nullptr);
-  auto p = BACKEND_MALLOC(sizeof(QuarantineQueueTy));
+  auto p = BACKEND_MALLOC(sizeof(QuarantineQueue));
   update_heap_usage(p, BACKEND_MALLOC_USABLE_SZIE);
-  m_queue = new (p) QuarantineQueueTy();
+  m_queue = new (p) QuarantineQueue();
   sgxsan_assert(m_queue != nullptr);
 
   m_quarantine_cache_used_size = 0;
@@ -30,7 +30,7 @@ void QuarantineCache::destory() {
   while (not empty())
     freeOldestQuarantineElement();
   // free struct that record Quarantine
-  m_queue->~deque();
+  m_queue->~QuarantineQueue();
   update_heap_usage(m_queue, BACKEND_MALLOC_USABLE_SZIE, false);
   BACKEND_FREE(m_queue);
   m_queue = nullptr;
@@ -104,7 +104,9 @@ void QuarantineCache::freeOldestQuarantineElement() {
 }
 
 void QuarantineCache::show() {
-  for (auto &qe : *m_queue) {
+  for (QuarantineNode *node = m_queue->head; node != nullptr;
+       node = node->next) {
+    const QuarantineElement &qe = node->data;
     log_always("[SHOW] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg,
                qe.user_beg, qe.user_beg + qe.user_size,
                qe.alloc_beg + qe.alloc_size);

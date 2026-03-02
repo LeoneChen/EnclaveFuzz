@@ -12,11 +12,10 @@ JOBS=$(nproc)
 DEBUG=0
 BUILD=0
 SETUP=0
+AS_SGX=0
 
-# MY_CC=${PROJ_DIR}/install/llvm-project/bin/clang
-# MY_CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
-MY_CC=clang-13
-MY_CXX=clang++-13
+MY_CC=${PROJ_DIR}/install/llvm-project/bin/clang
+MY_CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
 
 show_help() {
     echo "Usage: $0 [options]"
@@ -27,9 +26,10 @@ show_help() {
     echo "  -b|--build          Build"
     echo "  -s|--setup          Set up for fuzzing"
     echo "  -g|--debug          Debug mode"
+    echo "  --sgx               Build as orignal SGX way"
 }
 
-OPTS=$(getopt -o ht:gbs -l help,target:,debug,build,setup -n 'parse-options' -- "$@")
+OPTS=$(getopt -o ht:gbs -l help,target:,debug,build,setup,sgx -n 'parse-options' -- "$@")
 eval set -- "$OPTS"
 while true; do
     case "$1" in
@@ -53,6 +53,11 @@ while true; do
             SETUP=1
             shift
             ;;
+        --sgx)
+            AS_SGX=1
+            source /opt/intel/sgxsdk/environment
+            shift
+            ;;
         --)
             shift
             break
@@ -69,7 +74,7 @@ done
 ###################################
 case "${TARGET_NAME}" in
     "llvm-project")
-        TARGET_DIR=${PROJ_DIR}/ThirdParty/${TARGET_NAME}
+        TARGET_DIR=${PROJ_DIR}/third_party/${TARGET_NAME}
         BUILD_DIR=${PROJ_DIR}/build/${TARGET_NAME}
         INSTALL_DIR=${PROJ_DIR}/install/${TARGET_NAME}
         ;;
@@ -101,7 +106,7 @@ if [ ${BUILD} -eq 1 ]; then
     case "${TARGET_NAME}" in
         "llvm-project")
             pushd ${TARGET_DIR}
-                cmake -B ${BUILD_DIR} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCOMPILER_RT_DEBUG=ON -DLLVM_TARGETS_TO_BUILD="X86" -DLLVM_ENABLE_PROJECTS="clang;compiler-rt;lld" -DLLVM_ABI_BREAKING_CHECKS=FORCE_OFF ./llvm/ -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}
+                cmake -B ${BUILD_DIR} -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCOMPILER_RT_DEBUG=ON -DLLVM_TARGETS_TO_BUILD="X86" -DLLVM_ENABLE_PROJECTS="clang;compiler-rt;lld" -DLLVM_ABI_BREAKING_CHECKS=FORCE_OFF ./llvm/ -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}
                 cmake --build ${BUILD_DIR} -j${JOBS}
                 cmake --install ${BUILD_DIR}
             popd
@@ -168,13 +173,17 @@ if [ ${BUILD} -eq 1 ]; then
                 else
                     DEBUG_FLAG=" -O2"
                 fi
-                ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
+                if [ ${AS_SGX} -eq 1 ]; then
+                    ./configure CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}"
+                else
+                    ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
+                fi
                 make -j${JOBS}
             popd
             ;;
         "SGX_SQLite"|"sgx-reencrypt"|"sgx-wallet"|"SGXCryptoFile"|"SampleSGXSan")
             pushd ${TARGET_DIR}
-                make clean
+                make clean SGX_SDK="${PROJ_DIR}/install/enclave_fuzz"
                 if [ ${DEBUG} -eq 1 ]; then
                     DEBUG_FLAG=" SGX_DEBUG=1 SGX_PRERELEASE=0"
                 else

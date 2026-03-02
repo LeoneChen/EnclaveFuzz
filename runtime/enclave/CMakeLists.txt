@@ -10,6 +10,7 @@ set(RT_ENCLAVE_SOURCE
     PoisonCheck.cpp
     Poison.cpp
     Quarantine.cpp
+    SGXSanAnnotations.cpp
     SGXSanPrintf.cpp
     SGXSanRTEnclave.cpp
     StackTrace.cpp

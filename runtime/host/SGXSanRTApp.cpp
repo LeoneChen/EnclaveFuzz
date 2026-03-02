@@ -271,7 +271,8 @@ void sgxsan_sigaction(int signum, siginfo_t *siginfo, void *priv) {
   }
 }
 
-extern "C" void reg_sgxsan_sigaction() {
+extern "C" {
+void reg_sgxsan_sigaction() {
   // Register sgxsan_sigaction only once
   static bool HasRegisteredSigaction = false;
   if (HasRegisteredSigaction)
@@ -289,7 +290,8 @@ extern "C" void reg_sgxsan_sigaction() {
   sgxsan_assert(0 == sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]));
 }
 
-extern "C" {
+void sgxsan_abort() { abort(); }
+
 // Memory layout
 // ASAN's __asan_init -> __sanitizer_cov_8bit_counters_init ->
 // setCovMapAddr -> sgx_create_enclave -> enclave_create_ex -> reg_sig_handler

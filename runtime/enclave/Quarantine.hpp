@@ -1,10 +1,10 @@
 #pragma once
 
-#include "ContainerAllocator.hpp"
+#include "InternalDlmalloc.hpp"
+#include "Malloc.hpp"
 #include "Poison.hpp"
 #include "SGXSanRTConfig.h"
 #include <cstddef>
-#include <queue>
 
 struct QuarantineElement {
   uptr alloc_beg;
@@ -13,11 +13,47 @@ struct QuarantineElement {
   uptr user_size;
 };
 
-// Use SGXSan::ContainerAllocator(dlmalloc series as backend) avoid
-// malloc-new-malloc's like infinitive loop
-typedef std::deque<QuarantineElement,
-                   SGXSan::ContainerAllocator<QuarantineElement>>
-    QuarantineQueueTy;
+// Intrusive singly-linked list node for the quarantine queue.
+struct QuarantineNode {
+  QuarantineElement data;
+  QuarantineNode *next;
+};
+
+// Simple FIFO queue backed entirely by dlmalloc.
+// Avoids all STL containers so the sanitizer runtime never intercepts
+// its own container memory accesses (no self-detection reentrancy).
+struct QuarantineQueue {
+  QuarantineNode *head; // dequeue (pop_front) from here
+  QuarantineNode *tail; // enqueue (push_back) here
+
+  QuarantineQueue() : head(nullptr), tail(nullptr) {}
+
+  bool empty() const { return head == nullptr; }
+
+  QuarantineElement &front() { return head->data; }
+
+  void push_back(const QuarantineElement &qe) {
+    QuarantineNode *node =
+        static_cast<QuarantineNode *>(dlmalloc(sizeof(QuarantineNode)));
+    update_heap_usage(node, dlmalloc_usable_size);
+    node->data = qe;
+    node->next = nullptr;
+    if (tail)
+      tail->next = node;
+    else
+      head = node;
+    tail = node;
+  }
+
+  void pop_front() {
+    QuarantineNode *old = head;
+    head = head->next;
+    if (!head)
+      tail = nullptr;
+    update_heap_usage(old, dlmalloc_usable_size, false);
+    dlfree(old);
+  }
+};
 
 class QuarantineCache {
 public:
@@ -32,7 +68,7 @@ private:
   static bool empty() { return m_queue->empty(); }
   static void show();
 
-  static QuarantineQueueTy *m_queue;
+  static QuarantineQueue *m_queue;
   static size_t m_quarantine_cache_used_size;
   static size_t m_quarantine_cache_max_size;
 };
