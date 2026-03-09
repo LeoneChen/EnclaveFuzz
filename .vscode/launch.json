@@ -75,11 +75,15 @@
             ]
         },
         {
-            "name": "(gdb) Launch",
+            "name": "sgxwallet",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/sgx_apps/sgxwallet/sgxwallet",
-            "args": [],
+            "args": [
+                "-V",
+                "-y",
+                "-n"
+            ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/sgx_apps/sgxwallet/",
             "environment": [],
@@ -188,7 +192,7 @@
                     "text": "-gdb-set substitute-path /build/glibc-B3wQXB/glibc-2.31/ /home/leone/glibc-2.31",
                 },
                 {
-                    "text": "-gdb-set substitute-path /home/leone/EnclaveFuzz1/third_party/linux-sgx/sdk/simulation/urtssim/linux/enter_enclave.S /home/leone/EnclaveFuzz1/third_party/linux-sgx/psw/urts/linux/enter_enclave.S",
+                    "text": "-gdb-set substitute-path /home/leone/EnclaveFuzz/third_party/linux-sgx/sdk/simulation/urtssim/linux/enter_enclave.S /home/leone/EnclaveFuzz/third_party/linux-sgx/psw/urts/linux/enter_enclave.S",
                 }
             ]
         },

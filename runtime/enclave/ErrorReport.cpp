@@ -60,11 +60,11 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   if (fatal) {
     ll = LOG_LEVEL_ERROR;
     log_error_np("\n================ Error Report ================\n"
-                 "[SGXSan] ERROR: ");
+                 "[!] SGXSan ERROR: ");
   } else {
     ll = LOG_LEVEL_WARNING;
     log_warning_np("\n================ Warning Report ================\n"
-                   "[SGXSan] WARNING: ");
+                   "[!] SGXSan WARNING: ");
   }
 
   char buf[BUFSIZ];
@@ -89,7 +89,7 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
 void ReportDoubleFetch(uptr cur_fetch, size_t cur_size, uptr prev_fetch,
                        size_t prev_size, uptr *prev_bt, size_t prev_bt_cnt) {
   log_error_np("\n================ Error Report ================\n"
-               "[SGXSan] ERROR: Double fetch 0x%lx(0x%lx)\n\n",
+               "[!] SGXSan ERROR: Double fetch 0x%lx(0x%lx)\n\n",
                cur_fetch, cur_size);
   sgxsan_backtrace();
   log_error_np("\nPreviously fetch 0x%lx(0x%lx)\n\n", prev_fetch, prev_size);

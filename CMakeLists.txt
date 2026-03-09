@@ -18,7 +18,7 @@ install(TARGETS
         ARCHIVE DESTINATION lib64)
 
 
-install(FILES third_party/edger8r/_build/default/linux/Edger8r.bc
+install(FILES third_party/linux-sgx/sdk/edger8r/_build/default/linux/Edger8r.bc
     PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
     RENAME sgx_edger8r
     DESTINATION bin/x64)

@@ -77,8 +77,7 @@ if [ ${PREPARE_SDK} -eq 1 ]; then
 fi
 
 ########## Build sgx_edger8r ##########
-pushd ${PROJ_DIR}/third_party/edger8r
-    eval $(opam env)
+pushd ${PROJ_DIR}/third_party/linux-sgx/sdk/edger8r
     dune build
 popd
 

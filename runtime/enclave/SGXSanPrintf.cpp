@@ -8,10 +8,10 @@
 
 static const char *log_level_to_prefix[] = {
     "",
-    "[SGXSan error] ",
-    "[SGXSan warning] ",
-    "[SGXSan debug] ",
-    "[SGXSan trace] ",
+    "[!] SGXSan ERROR: ",
+    "[!] SGXSan WARNING: ",
+    "[!] SGXSan DEBUG: ",
+    "[!] SGXSan TRACE: ",
 };
 
 // can't call malloc, since malloc may call this function

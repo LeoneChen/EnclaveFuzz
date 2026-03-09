@@ -53,17 +53,19 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   delete g_fdp;
   g_fdp = new FuzzedDataProvider(Data, Size);
 
-  if (sgx_create_enclave("TestEnclave",
-                         SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL,
-                         NULL, &__g_harness_eid, NULL) != SGX_SUCCESS) {
-    fprintf(stderr, "[!] sgx_create_enclave fail");
+  sgx_status_t create_ret = sgx_create_enclave(
+      "TestEnclave", SGX_DEBUG_FLAG /* Debug Support: set to 1 */, NULL, NULL,
+      &__g_harness_eid, NULL);
+  if (create_ret != SGX_SUCCESS) {
+    fprintf(stderr, "[!] sgx_create_enclave fail: 0x%x\n", create_ret);
     abort();
   }
 
   customized_harness();
 
-  if (sgx_destroy_enclave(__g_harness_eid) != SGX_SUCCESS) {
-    fprintf(stderr, "[!] sgx_destroy_enclave fail");
+  sgx_status_t destroy_ret = sgx_destroy_enclave(__g_harness_eid);
+  if (destroy_ret != SGX_SUCCESS) {
+    fprintf(stderr, "[!] sgx_destroy_enclave fail: 0x%x\n", destroy_ret);
     abort();
   }
 

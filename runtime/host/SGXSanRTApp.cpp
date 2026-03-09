@@ -62,10 +62,10 @@ std::string sgxsan_exec(const char *cmd) {
 /* Log util */
 static const char *log_level_to_prefix[] = {
     "",
-    "[SGXSan error] ",
-    "[SGXSan warning] ",
-    "[SGXSan debug] ",
-    "[SGXSan trace] ",
+    "[!] SGXSan ERROR: ",
+    "[!] SGXSan WARNING: ",
+    "[!] SGXSan DEBUG: ",
+    "[!] SGXSan TRACE: ",
 };
 
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...) {
@@ -351,6 +351,7 @@ void sgxsan_ocall_addr2line(uint64_t *addr_arr, size_t arr_cnt, int level) {
   size_t bt_cnt =
       boost::stacktrace::safe_dump_to(bt_buf, sizeof(decltype(bt_buf)));
 
+  sgxsan_log(ll, false, "[*] SGXSan Backtrace:\n");
   // Print host ocall frames until we find sgx_urts_vdso_handler
   size_t i = 0;
   for (; i < bt_cnt; i++) {

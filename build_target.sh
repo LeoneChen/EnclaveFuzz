@@ -11,8 +11,7 @@ INSTALL_DIR=""
 JOBS=$(nproc)
 DEBUG=0
 BUILD=0
-SETUP=0
-AS_SGX=0
+AS_FUZZ=0
 
 MY_CC=${PROJ_DIR}/install/llvm-project/bin/clang
 MY_CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
@@ -24,12 +23,11 @@ show_help() {
     echo "  -h|--help           Show this help message"
     echo "  -t|--target         Target to build"
     echo "  -b|--build          Build"
-    echo "  -s|--setup          Set up for fuzzing"
     echo "  -g|--debug          Debug mode"
-    echo "  --sgx               Build as orignal SGX way"
+    echo "  --fuzz              Build for fuzzing"
 }
 
-OPTS=$(getopt -o ht:gbs -l help,target:,debug,build,setup,sgx -n 'parse-options' -- "$@")
+OPTS=$(getopt -o ht:gb -l help,target:,debug,build,fuzz -n 'parse-options' -- "$@")
 eval set -- "$OPTS"
 while true; do
     case "$1" in
@@ -49,13 +47,8 @@ while true; do
             BUILD=1
             shift
             ;;
-        -s|--setup)
-            SETUP=1
-            shift
-            ;;
-        --sgx)
-            AS_SGX=1
-            source /opt/intel/sgxsdk/environment
+        --fuzz)
+            AS_FUZZ=1
             shift
             ;;
         --)
@@ -169,14 +162,14 @@ if [ ${BUILD} -eq 1 ]; then
                 fi
                 ./autoconf.bash
                 if [ ${DEBUG} -eq 1 ]; then
-                    DEBUG_FLAG=" -O2 -g"
+                    DEBUG_FLAG=" -Og -g"
                 else
                     DEBUG_FLAG=" -O2"
                 fi
-                if [ ${AS_SGX} -eq 1 ]; then
-                    ./configure CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}"
-                else
+                if [ ${AS_FUZZ} -eq 1 ]; then
                     ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
+                else
+                    ./configure CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}"
                 fi
                 make -j${JOBS}
             popd
@@ -236,7 +229,7 @@ fi
 ###################################
 # SETUP WORKDIR FOR TARGETS
 ###################################
-if [ ${SETUP} -eq 1 ]; then
+if [ ${AS_FUZZ} -eq 1 ]; then
     echo "[+] Setting up workdir..."
     case "${TARGET_NAME}" in
         "wasm-micro-runtime")
