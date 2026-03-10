@@ -13,6 +13,10 @@ void MemAccessMgrOutEnclaveAccess(const void *start, size_t size, bool is_write,
                                   bool used_to_cmp = false);
 void MemAccessMgrInEnclaveAccess();
 
+void _hook_tproxy_head(void);
+void _hook_tproxy_tail(void);
+void _hook_before_ecall();
+void _hook_after_ecall();
 #if defined(__cplusplus)
 }
 #endif

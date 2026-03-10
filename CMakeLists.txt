@@ -30,7 +30,6 @@ install(DIRECTORY
     PATTERN common/inc/internal EXCLUDE)
 
 install(FILES
-        runtime/enclave/SGXSanRTEnclave.edl
         ${SGXSDK_DIR}/external/sgx-emm/emm_src/include/sgx_mm.h
         ${SGXSDK_DIR}/external/sgx-emm/emm_src/include/sgx_mm_primitives.h
         ${SGXSDK_DIR}/external/sgx-emm/emm_src/include/sgx_mm_rt_abstraction.h

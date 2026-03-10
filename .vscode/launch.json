@@ -156,11 +156,11 @@
             "name": "TestApp",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/workdir/SampleSGXSan/TestApp",
+            "program": "${workspaceFolder}/workdir/sgxwallet/TestApp",
             "args": [
-                "./result/seeds",
-                "-artifact_prefix=./result/crashes/",
-                // "./result/crashes/crash-8bf7b464aaa2c2b536aa1d76a1297c19155f5603",
+                // "./result/seeds",
+                // "-artifact_prefix=./result/crashes/",
+                "./result/seeds/adc83b19e793491b1c6ea0fd8b46cd9f32e592fc",
                 // "-rss_limit_mb=10240",
                 // "-print_coverage=1",
                 // "-runs=0"
@@ -168,7 +168,7 @@
                 // "-ignore_crashes=1",
             ],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/workdir/SampleSGXSan",
+            "cwd": "${workspaceFolder}/workdir/sgxwallet",
             "environment": [
                 {
                     "name": "LD_LIBRARY_PATH",

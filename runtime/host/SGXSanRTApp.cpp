@@ -1,4 +1,5 @@
 #include "SGXSanRTConfig.h"
+#include "sgxsan_ocall_ms.h"
 #include <array>
 #include <assert.h>
 #include <boost/stacktrace.hpp>
@@ -595,4 +596,29 @@ int __sanitizer_get_module_and_offset_for_pc(uptr pc, char *module_name,
   }
   return true;
 }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Built-in ocall bridges (strong symbols — override weak decls in linux-sgx
+// psw/urts/enclave.cpp when SGXSanRTApp is linked).
+// ──────────────────────────────────────────────────────────────────────────────
+
+extern "C" sgx_status_t sgxsan_ocall_init_shadow_memory_bridge(void *pms) {
+  auto *ms = reinterpret_cast<ms_sgxsan_ocall_init_shadow_memory_t *>(pms);
+  sgxsan_ocall_init_shadow_memory(
+      ms->ms_enclave_base, ms->ms_enclave_size, ms->ms_cntrs_copy_start,
+      ms->ms_cntrs_copy_end, ms->ms_pcs_copy_start, ms->ms_pcs_copy_end);
+  return SGX_SUCCESS;
+}
+
+extern "C" sgx_status_t sgxsan_ocall_print_string_bridge(void *pms) {
+  auto *ms = reinterpret_cast<ms_sgxsan_ocall_print_string_t *>(pms);
+  sgxsan_ocall_print_string(ms->ms_str);
+  return SGX_SUCCESS;
+}
+
+extern "C" sgx_status_t sgxsan_ocall_addr2line_bridge(void *pms) {
+  auto *ms = reinterpret_cast<ms_sgxsan_ocall_addr2line_t *>(pms);
+  sgxsan_ocall_addr2line(ms->ms_addr_arr, ms->ms_arr_cnt, ms->ms_level);
+  return SGX_SUCCESS;
 }

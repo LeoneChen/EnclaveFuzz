@@ -161,15 +161,18 @@ if [ ${BUILD} -eq 1 ]; then
                     make clean
                 fi
                 ./autoconf.bash
-                if [ ${DEBUG} -eq 1 ]; then
-                    DEBUG_FLAG=" -Og -g"
-                else
-                    DEBUG_FLAG=" -O2"
-                fi
                 if [ ${AS_FUZZ} -eq 1 ]; then
-                    ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
+                    if [ ${DEBUG} -eq 1 ]; then
+                        ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CFLAGS=" -Og -g" CXXFLAGS=" -Og -g" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
+                    else
+                        ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
+                    fi
                 else
-                    ./configure CFLAGS="${DEBUG_FLAG}" CXXFLAGS="${DEBUG_FLAG}"
+                    if [ ${DEBUG} -eq 1 ]; then
+                        ./configure CFLAGS=" -O0 -g" CXXFLAGS=" -O0 -g"
+                    else
+                        ./configure --with-sgx-build=prerelease
+                    fi
                 fi
                 make -j${JOBS}
             popd

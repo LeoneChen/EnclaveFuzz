@@ -1,10 +1,4 @@
-*.o
-*.a
-*.so
 build
 install
-install
-sgx_edger8r
 workdir
-.vscode/settings.json
-.vscode/c_cpp_properties.json
+*.log

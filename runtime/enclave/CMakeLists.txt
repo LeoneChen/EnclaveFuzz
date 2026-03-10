@@ -13,6 +13,7 @@ set(RT_ENCLAVE_SOURCE
     SGXSanAnnotations.cpp
     SGXSanPrintf.cpp
     SGXSanRTEnclave.cpp
+    SGXSanRTTBridge.cpp
     StackTrace.cpp
     UntrustSPAdjust.cpp)
 

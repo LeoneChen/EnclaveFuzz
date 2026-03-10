@@ -10,14 +10,16 @@ CompileFlags:
         # -I/home/leone/EnclaveFuzz/install/llvm-project/include/,
         # linux-sgx
         -I/home/leone/EnclaveFuzz/third_party/linux-sgx/common/inc,
-        # -I/home/leone/EnclaveFuzz/third_party/linux-sgx/common/inc/internal,
+        -I/home/leone/EnclaveFuzz/third_party/linux-sgx/common/inc/internal,
         # -I/home/leone/EnclaveFuzz/third_party/linux-sgx/common/inc/tlibc/,
         # -I/home/leone/EnclaveFuzz/third_party/linux-sgx/sdk/trts,
+        -I/home/leone/EnclaveFuzz/third_party/linux-sgx/psw/urts,
+        -I/home/leone/EnclaveFuzz/third_party/linux-sgx/psw/urts/linux,
         # SampleSGXSan
         # -I/home/leone/EnclaveFuzz/sgx_apps/SampleSGXSan/Include/,
         # wasm-micro-runtime
         # -I/home/leone/EnclaveFuzz/sgx_apps/wasm-micro-runtime/product-mini/platforms/linux-sgx/enclave-sample/App,
         # sgxwallet
-        -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/sgx-gmp,
-        -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/third_party/SCIPR/,
+        # -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/sgx-gmp,
+        # -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/third_party/SCIPR/,
     ]

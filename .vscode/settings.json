@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        ".clangd": "yaml",
+        "*.tcc": "cpp"
+    },
+}
