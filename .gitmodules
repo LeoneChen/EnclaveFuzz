@@ -24,4 +24,7 @@
 	url = git@github.com:LeoneChen/SampleSGXSan.git
 [submodule "sgx_apps/mobilecoin"]
 	path = sgx_apps/mobilecoin
-	url = git@github.com:mobilecoinfoundation/mobilecoin.git
+	url = git@github.com:LeoneChen/mobilecoin.git
+[submodule "third_party/linux-sgx-v"]
+	path = third_party/linux-sgx-v
+	url = git@github.com:LeoneChen/linux-sgx.git

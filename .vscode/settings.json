@@ -3,4 +3,9 @@
         ".clangd": "yaml",
         "*.tcc": "cpp"
     },
+    "rust-analyzer.linkedProjects": [
+        "/home/leone/EnclaveFuzz/sgx_apps/mobilecoin/fog/ingest/enclave/Cargo.toml",
+        "/home/leone/EnclaveFuzz/sgx_apps/mobilecoin/consensus/enclave/trusted/Cargo.toml",
+        "/home/leone/EnclaveFuzz/sgx_apps/mobilecoin/consensus/enclave/fuzz/Cargo.toml",
+    ]
 }

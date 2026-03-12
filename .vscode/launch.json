@@ -104,20 +104,20 @@
             ]
         },
         {
+            "name": "mobilecoin",
             "type": "cppdbg",
             "request": "launch",
-            "name": "Debug Enclave Test (sgx-gdb + Rust)",
             "program": "${workspaceFolder}/sgx_apps/mobilecoin/target/debug/fuzz_ecall",
             "args": [
                 "corpus/",
                 "-max_len=4096"
             ],
-            "miDebuggerPath": "/home/leone/EnclaveFuzz1/gdb/sgx-gdb",
+            "miDebuggerPath": "/home/leone/EnclaveFuzz/gdb/sgx-gdb",
             "cwd": "${workspaceFolder}/sgx_apps/mobilecoin",
             "environment": [
                 {
                     "name": "ENCLAVE_PATH",
-                    "value": "/home/leone/EnclaveFuzz1/sgx_apps/mobilecoin/target/debug/libconsensus-enclave.signed.so"
+                    "value": "/home/leone/EnclaveFuzz/sgx_apps/mobilecoin/target/debug/libconsensus-enclave.signed.so"
                 }
             ],
             "setupCommands": [
@@ -130,6 +130,9 @@
                     "description": "Enable pretty-printing",
                     "text": "-enable-pretty-printing",
                     "ignoreFailures": true
+                },
+                {
+                    "text": "-gdb-set substitute-path /home/sgx/jenkins/workspace/SDK_DCAP_build_release/main_repo/modules/linux-sgx/ /home/leone/confidential-computing.sgx",
                 }
             ]
         },
@@ -160,9 +163,9 @@
             "args": [
                 // "./result/seeds",
                 // "-artifact_prefix=./result/crashes/",
-                "./result/seeds/adc83b19e793491b1c6ea0fd8b46cd9f32e592fc",
-                // "-rss_limit_mb=10240",
-                // "-print_coverage=1",
+                "./result/crashes/crash-adc83b19e793491b1c6ea0fd8b46cd9f32e592fc",
+                "-rss_limit_mb=10240",
+                "-print_coverage=1",
                 // "-runs=0"
                 // "-fork=1",
                 // "-ignore_crashes=1",

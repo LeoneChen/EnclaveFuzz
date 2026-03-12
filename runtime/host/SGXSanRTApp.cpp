@@ -293,6 +293,8 @@ void reg_sgxsan_sigaction() {
 
 void sgxsan_abort() { abort(); }
 
+void sgxsan_on_enclave_crashed(void) { abort(); }
+
 // Memory layout
 // ASAN's __asan_init -> __sanitizer_cov_8bit_counters_init ->
 // setCovMapAddr -> sgx_create_enclave -> enclave_create_ex -> reg_sig_handler
