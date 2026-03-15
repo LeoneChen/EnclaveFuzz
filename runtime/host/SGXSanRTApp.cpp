@@ -140,6 +140,13 @@ bool resolve_module_info(uptr pc, SymbolInfo &sym_info) {
     sym_info.module_path = "TestEnclave";
     sym_info.module_base = g_enclave_base;
     sym_info.is_pie_result = 1;
+  } else if (ENCLAVE_FAKE_BASE <= pc &&
+             pc < ENCLAVE_FAKE_BASE + ENCLAVE_FAKE_SIZE) {
+    // Normalized enclave PC from proxy table (pc = offset + ENCLAVE_FAKE_BASE)
+    sym_info.has_module_info = true;
+    sym_info.module_path = "TestEnclave";
+    sym_info.module_base = ENCLAVE_FAKE_BASE;
+    sym_info.is_pie_result = 1;
   } else {
     Dl_info info;
     sym_info.has_module_info = (dladdr((void *)pc, &info) != 0);
@@ -402,6 +409,23 @@ void sancov_copy_init() {
     fprintf(stderr, "cntrs/pcs size invalid\n");
     abort();
   }
+  result = sgxsan_exec("size TestEnclave | awk 'NR==2{print $4}'");
+  auto enclave_vsize = std::stoull(result);
+  if (enclave_vsize >= ENCLAVE_FAKE_SIZE) {
+    fprintf(stderr,
+            "Enclave virtual size %zu >= ENCLAVE_FAKE_SIZE %zu, "
+            "increase ENCLAVE_FAKE_SIZE\n",
+            (size_t)enclave_vsize, (size_t)ENCLAVE_FAKE_SIZE);
+    abort();
+  }
+  // Reserve ENCLAVE_FAKE_BASE to prevent other mappings from colliding with
+  // normalized enclave PCs.
+  if (mmap((void *)ENCLAVE_FAKE_BASE, ENCLAVE_FAKE_SIZE, PROT_NONE,
+           MAP_PRIVATE | MAP_FIXED_NOREPLACE | MAP_NORESERVE | MAP_ANON, -1,
+           0) == MAP_FAILED) {
+    fprintf(stderr, "mmap ENCLAVE_FAKE_BASE failed\n");
+    abort();
+  }
   g_sancov_cntrs_copy_start = (uint8_t *)calloc(1, cntrs_size);
   g_sancov_pcs_copy_start = (uintptr_t *)calloc(16, cntrs_size);
   if (!g_sancov_cntrs_copy_start || !g_sancov_pcs_copy_start) {
@@ -564,7 +588,7 @@ void __sanitizer_symbolize_pc(uptr pc, const char *fmt, char *out_buf,
 int __sanitizer_get_module_and_offset_for_pc(uptr pc, char *module_name,
                                              uptr module_name_len,
                                              uptr *pc_offset) {
-  if (g_enclave_base <= pc && pc < g_enclave_base + g_enclave_size) {
+  if (ENCLAVE_FAKE_BASE <= pc && pc < ENCLAVE_FAKE_BASE + ENCLAVE_FAKE_SIZE) {
     // Fill module name
     if (module_name && module_name_len) {
       strncpy(module_name, "TestEnclave", module_name_len - 1);
@@ -573,7 +597,7 @@ int __sanitizer_get_module_and_offset_for_pc(uptr pc, char *module_name,
 
     // Calculate offset
     if (pc_offset) {
-      *pc_offset = pc - g_enclave_base; // Relative offset for enclave
+      *pc_offset = pc - ENCLAVE_FAKE_BASE; // Relative offset for enclave
     }
   } else {
     Dl_info info;

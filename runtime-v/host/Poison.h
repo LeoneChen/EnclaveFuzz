@@ -17,8 +17,10 @@ const int kAsanStackUseAfterScopeMagic = 0x88 /* 0xf8 */;
 const int kAsanGlobalRedzoneMagic = 0x89 /* 0xf9 */;
 const int kAsanHeapLeftRedzoneMagic = 0x8a /* 0xfa */;
 const int kAsanHeapRightRedzoneMagic = 0x8b /* 0xfb */;
+const int kAsanContiguousContainerOOBMagic = 0x8c /* 0xfc */;
 const int kAsanHeapFreeMagic = 0x8d /* 0xfd */;
 const int kAsanInternalHeapMagic = 0x8e /* 0xfe */;
+const int kAsanInitializationOrderMagic = 0x8f /* 0xf6 */;
 /// Indicate memory byte is of Enclave or not
 const int kSGXSanInEnclaveMagic = 0x40;
 

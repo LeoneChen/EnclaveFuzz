@@ -139,9 +139,16 @@ __attribute__((destructor)) void dump_sancov() {
   memcpy_s((void *)g_sancov_copy_cntrs_start,
            g_sancov_copy_cntrs_end - g_sancov_copy_cntrs_start,
            g_sancov_cntrs_start, g_sancov_cntrs_end - g_sancov_cntrs_start);
-  memcpy_s((void *)g_sancov_copy_pcs_start,
-           (g_sancov_copy_pcs_end - g_sancov_copy_pcs_start) * 8,
-           g_sancov_pcs_start, (g_sancov_pcs_end - g_sancov_pcs_start) * 8);
+  // Normalize PCs: (raw_pc - enclave_base) + ENCLAVE_FAKE_BASE so that
+  // libfuzzer's ObservedPCs set sees the same PC value across ASLR reloads.
+  // Each PC table entry is {uintptr_t pc, uintptr_t flags}; step by 2.
+  size_t n = g_sancov_pcs_end - g_sancov_pcs_start;
+  for (size_t i = 0; i < n; i += 2) {
+    uintptr_t raw_pc = g_sancov_pcs_start[i];
+    g_sancov_copy_pcs_start[i] =
+        raw_pc ? (raw_pc - (uintptr_t)g_enclave_base) + ENCLAVE_FAKE_BASE : 0;
+    g_sancov_copy_pcs_start[i + 1] = g_sancov_pcs_start[i + 1]; // flags
+  }
 }
 
 void __sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop) {

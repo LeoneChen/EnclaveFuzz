@@ -39,6 +39,10 @@
 #define kHighShadowGuardBeg (kHighShadowEnd + 1)
 #define kHighShadowGuardEnd (kHighShadowEnd + PAGE_SIZE)
 
+/* Sancov proxy fake base for stable PC normalization across ASLR reloads */
+#define ENCLAVE_FAKE_BASE 0x400000000UL
+#define ENCLAVE_FAKE_SIZE (256UL * 1024 * 1024)
+
 /* Log util */
 enum log_level {
   LOG_LEVEL_NONE,

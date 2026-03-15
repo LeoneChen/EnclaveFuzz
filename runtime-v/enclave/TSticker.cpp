@@ -90,13 +90,16 @@ void *realloc(void *oldmem, size_t bytes) {
 size_t sgxsan_malloc_usable_size(void *mem);
 size_t malloc_usable_size(void *mem) { return sgxsan_malloc_usable_size(mem); }
 
-int sgxsan_vsnprintf(char *str, size_t size, const char *format, va_list ap);
-int snprintf(char *str, size_t size, const char *format, ...) {
-  va_list ap;
-  va_start(ap, format);
-  int ret = sgxsan_vsnprintf(str, size, format, ap);
-  va_end(ap);
-  return ret;
+// Intercept enclave DSO's sancov registrations via protected visibility.
+// Within this DSO, all calls bind to these definitions instead of libfuzzer's.
+__attribute__((visibility("protected"))) void
+__sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop) {
+  SGXSanSaveEnclaveCntrsRange(Start, Stop);
+}
+
+__attribute__((visibility("protected"))) void
+__sanitizer_cov_pcs_init(const uintptr_t *Start, const uintptr_t *Stop) {
+  SGXSanSaveEnclavePCsRange(Start, Stop);
 }
 }
 

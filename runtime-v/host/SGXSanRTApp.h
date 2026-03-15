@@ -86,6 +86,12 @@ __attribute__((weak)) bool DFEnableCollectStack();
 
 void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
 void SGXSanLogEnter(const char *str);
+
+void SancovInit();
+void DumpSancov();
+void SGXSanSaveEnclaveCntrsRange(uint8_t *Start, uint8_t *Stop);
+void SGXSanSaveEnclavePCsRange(const uintptr_t *Start, const uintptr_t *Stop);
+
 #if defined(__cplusplus)
 }
 #endif
@@ -215,4 +221,3 @@ static inline uptr ExtendInt8(uint8_t _8bit) {
 }
 
 void ClearSGXSanRT();
-void ClearStackPoison();

@@ -31,18 +31,18 @@ extern "C" {
 __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
 void customized_init();
 void customized_harness();
+void SancovInit();
 
 // libFuzzer Callbacks
 int LLVMFuzzerInitialize(int *argc, char ***argv) {
   (void)argc;
   (void)argv;
+  SancovInit();
   customized_init();
   return 0;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
-  sgx_destroy_enclave(__g_harness_eid);
-
   if (SGXFuzzerEnvClearBeforeTest && SGXFuzzerEnvClearBeforeTest() != 0) {
     fprintf(stderr, "[!] SGXFuzzerEnvClearBeforeTest fail");
     abort();
@@ -61,6 +61,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     free(memArea);
   }
   g_alloc_mgr.clear();
+
+  // Destroy at end so DumpSancov runs before libfuzzer reads coverage data
+  sgx_destroy_enclave(__g_harness_eid);
 
   return 0;
 }

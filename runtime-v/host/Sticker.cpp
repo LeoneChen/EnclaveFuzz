@@ -262,6 +262,9 @@ void ClearSticker() {
 sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
   auto handle = gEnclaveInfo.GetHandler();
   if (handle) {
+    // Copy enclave sancov counters and PCs to proxy before unloading DSO
+    DumpSancov();
+
     // Since we will access object belong to Enclave, so set RunInEnclave to
     // true
     RunInEnclave = true;
@@ -272,7 +275,6 @@ sgx_status_t SGXAPI sgx_destroy_enclave(const sgx_enclave_id_t enclave_id) {
     ClearSGXSanRT();
     MemAccessMgrClear();
     ClearSticker();
-    ClearStackPoison();
     ClearHeapObject();
   }
   return SGX_SUCCESS;

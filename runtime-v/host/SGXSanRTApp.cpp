@@ -8,7 +8,6 @@
 #include <boost/stacktrace.hpp>
 #include <dlfcn.h>
 #include <execinfo.h>
-#include <fstream>
 #include <iostream>
 #include <pthread.h>
 #include <signal.h>
@@ -22,8 +21,8 @@
 #include <unistd.h>
 
 static const char *log_level_to_prefix[] = {
-    "[SGXSan] ALWAYS: ", "[SGXSan] ERROR: ", "[SGXSan] WARNING: ",
-    "[SGXSan] DEBUG: ",  "[SGXSan] TRACE: ",
+    "[!] SGXSan ALWAYS: ", "[!] SGXSan ERROR: ", "[!] SGXSan WARNING: ",
+    "[!] SGXSan DEBUG: ",  "[!] SGXSan TRACE: ",
 };
 
 bool asan_inited = false;
@@ -43,7 +42,22 @@ struct SymbolInfo {
 
 static thread_local std::unordered_map<uptr, SymbolInfo> symbolize_cache;
 
-static void ClearSymbolizeCache() { symbolize_cache.clear(); }
+/// Sancov proxy scheme
+/// libfuzzer registers proxy buffers once; enclave counters are copied into
+/// them before each dlclose so libfuzzer always reads stable addresses.
+#define ENCLAVE_FAKE_BASE 0x400000000UL
+#define ENCLAVE_FAKE_SIZE (256UL * 1024 * 1024)
+
+static uint8_t *g_sancov_proxy_cntrs_start = nullptr;
+static uint8_t *g_sancov_proxy_cntrs_end = nullptr;
+static uintptr_t *g_sancov_proxy_pcs_start = nullptr;
+static uintptr_t *g_sancov_proxy_pcs_end = nullptr;
+
+// Set by sancov hook when enclave DSO registers its counters/PCs
+static uint8_t *g_sancov_enclave_cntrs_start = nullptr;
+static uint8_t *g_sancov_enclave_cntrs_end = nullptr;
+static const uintptr_t *g_sancov_enclave_pcs_start = nullptr;
+static const uintptr_t *g_sancov_enclave_pcs_end = nullptr;
 
 static std::string sgxsan_exec(const char *cmd) {
   std::array<char, 128> buffer;
@@ -82,6 +96,7 @@ void SetUserDieCallback(DieCallbackType callback) {
 }
 
 void NORETURN Die() {
+  DumpSancov(); // 确保 proxy buffer 最新，再让 libfuzzer 读
   if (UserDieCallback)
     UserDieCallback();
   _Exit(77);
@@ -306,7 +321,7 @@ void ReportError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                  uptr access_size, const char *msg, ...) {
   log_level ll = LOG_LEVEL_ERROR;
   log_error_np("\n================ Error Report ================\n"
-               "[SGXSan] ERROR: ");
+               "[!] SGXSan ERROR: ");
 
   char buf[BUFSIZ];
   va_list ap;
@@ -337,11 +352,11 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   if (fatal) {
     ll = LOG_LEVEL_ERROR;
     log_error_np("\n================ Error Report ================\n"
-                 "[SGXSan] ERROR: ");
+                 "[!] SGXSan ERROR: ");
   } else {
     ll = LOG_LEVEL_WARNING;
     log_warning_np("\n================ Warning Report ================\n"
-                   "[SGXSan] WARNING: ");
+                   "[!] SGXSan WARNING: ");
   }
 
   char buf[BUFSIZ];
@@ -371,7 +386,7 @@ void ReportUseAfterFree(uptr pc, uptr bp, uptr sp, uptr addr) {
   log_level ll = LOG_LEVEL_ERROR;
   log_error_np(
       "\n================ Error Report ================\n"
-      "[SGXSan] ERROR: %s Use after free 0x%lx at pc %p bp 0x%lx "
+      "[!] SGXSan ERROR: %s Use after free 0x%lx at pc %p bp 0x%lx "
       "sp 0x%lx\n\n",
       (sgx_is_within_enclave((const void *)addr, 1) ? "Enclave" : "Host"), addr,
       (void *)pc, bp, sp);
@@ -392,7 +407,7 @@ void ReportDoubleFree(uptr pc, uptr bp, uptr sp, uptr addr) {
   log_level ll = LOG_LEVEL_ERROR;
   log_error_np(
       "\n================ Error Report ================\n"
-      "[SGXSan] ERROR: %s Double Free 0x%lx at pc %p bp 0x%lx "
+      "[!] SGXSan ERROR: %s Double Free 0x%lx at pc %p bp 0x%lx "
       "sp 0x%lx\n\n",
       (sgx_is_within_enclave((const void *)addr, 1) ? "Enclave" : "Host"), addr,
       (void *)pc, bp, sp);
@@ -411,7 +426,7 @@ void ReportDoubleFree(uptr pc, uptr bp, uptr sp, uptr addr) {
 void ReportDoubleFetch(uptr cur_fetch, size_t cur_size, uptr prev_fetch,
                        size_t prev_size, uptr *prev_bt, size_t prev_bt_cnt) {
   log_error_np("\n================ Error Report ================\n"
-               "[SGXSan] ERROR: Double fetch 0x%lx(0x%lx)\n\n",
+               "[!] SGXSan ERROR: Double fetch 0x%lx(0x%lx)\n\n",
                cur_fetch, cur_size);
   sgxsan_backtrace();
   log_error_np("\nPreviously fetch 0x%lx(0x%lx)\n\n", prev_fetch, prev_size);
@@ -438,21 +453,47 @@ int is_pie(const char *path) {
   return ehdr.e_type == ET_DYN;
 }
 
+static bool resolve_module_info(uptr pc, SymbolInfo &sym_info) {
+  if (g_sancov_proxy_pcs_start && ENCLAVE_FAKE_BASE <= pc &&
+      pc < ENCLAVE_FAKE_BASE + ENCLAVE_FAKE_SIZE) {
+    sym_info.has_module_info = true;
+    sym_info.module_path = "TestEnclave";
+    sym_info.module_base = ENCLAVE_FAKE_BASE;
+    sym_info.is_pie_result = 1;
+  } else {
+    Dl_info info;
+    sym_info.has_module_info = (dladdr((void *)pc, &info) != 0);
+    if (sym_info.has_module_info) {
+      sym_info.module_path = info.dli_fname;
+      sym_info.module_base = (uptr)info.dli_fbase;
+      sym_info.is_pie_result = is_pie(info.dli_fname);
+    }
+  }
+  return sym_info.has_module_info;
+}
+
+static std::string run_addr2line(const char *module_path, uptr addr,
+                                 int pie_status, uptr base_addr,
+                                 const char *extra_flags = "") {
+  std::stringstream cmd;
+  cmd << "llvm-addr2line-13 -afC";
+  if (extra_flags && extra_flags[0])
+    cmd << " " << extra_flags;
+  if (pie_status > 0)
+    cmd << " --adjust-vma=0x" << std::hex << base_addr;
+  cmd << " -e " << module_path << " " << std::hex << addr;
+  return sgxsan_exec(cmd.str().c_str());
+}
+
 void sgxsan_dump_bt_buf(void **array, size_t size) {
   log_always_np("[*] SGXSan Backtrace:\n");
-  Dl_info info;
   for (size_t i = 0; i < size; i++) {
-    if (dladdr(array[i], &info) != 0) {
-      std::stringstream cmd;
-      if (is_pie(info.dli_fname) > 0) {
-        cmd << "llvm-addr2line-13 -afCpi --adjust-vma=0x" << std::hex
-            << (uptr)info.dli_fbase << " -e " << info.dli_fname << " "
-            << ((uptr)array[i] - 4);
-      } else {
-        cmd << "llvm-addr2line-13 -afCpi -e " << info.dli_fname << " "
-            << std::hex << ((uptr)array[i] - 4);
-      }
-      auto result = sgxsan_exec(cmd.str().c_str());
+    uptr pc = (uptr)array[i] - 4;
+    SymbolInfo sym_info;
+    if (resolve_module_info(pc, sym_info)) {
+      auto result =
+          run_addr2line(sym_info.module_path.c_str(), pc,
+                        sym_info.is_pie_result, sym_info.module_base, "-pi");
       log_always_np("%s", result.c_str());
     } else {
       log_always_np("%p\n", array[i]);
@@ -491,25 +532,86 @@ extern "C" void _hook_tbridge_tail() {
   sgxsan_assert(TD_init_count >= 0);
 }
 
-void ClearSGXSanRT() {
-  sgxsan_assert(TD_init_count == 0);
-  ClearSymbolizeCache();
+void ClearSGXSanRT() { sgxsan_assert(TD_init_count == 0); }
+
+// Called from TSticker's protected-visibility sancov interceptors
+extern "C" void SGXSanSaveEnclaveCntrsRange(uint8_t *Start, uint8_t *Stop) {
+  g_sancov_enclave_cntrs_start = Start;
+  g_sancov_enclave_cntrs_end = Stop;
 }
 
-void ClearStackPoison() {
-  std::fstream f("/proc/self/maps", std::ios::in);
-  std::string line;
-  while (std::getline(f, line)) {
-    if (line.find("[stack]") != std::string::npos) {
-      std::vector<std::string> vec1, vec2;
-      boost::split(vec1, line, [](char c) { return c == ' '; });
-      boost::trim(vec1[0]);
-      boost::split(vec2, vec1[0], [](char c) { return c == '-'; });
-      sgxsan_assert(vec2.size() == 2);
-      uptr stackBase = std::stoull("0x" + vec2[0], 0, 16);
-      uptr stackEnd = std::stoull("0x" + vec2[1], 0, 16);
-      PoisonShadow(stackBase, stackEnd - stackBase, 0, true);
-    }
+extern "C" void SGXSanSaveEnclavePCsRange(const uintptr_t *Start,
+                                          const uintptr_t *Stop) {
+  g_sancov_enclave_pcs_start = Start;
+  g_sancov_enclave_pcs_end = Stop;
+}
+
+extern "C" {
+extern void __sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop);
+extern void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
+                                     const uintptr_t *pcs_end);
+}
+
+void SancovInit() {
+  // Read section sizes from ELF without loading the DSO
+  std::string result = sgxsan_exec(
+      "size -A TestEnclave | grep __sancov_cntrs | awk '{print $2}'");
+  size_t cntrs_size = std::stoull(result);
+
+  result =
+      sgxsan_exec("size -A TestEnclave | grep __sancov_pcs | awk '{print $2}'");
+  size_t pcs_size = std::stoull(result);
+  sgxsan_error(!cntrs_size || !pcs_size || cntrs_size != (pcs_size / 16),
+               "cntrs/pcs size invalid\n");
+
+  // Verify enclave fits within fake address range
+  result = sgxsan_exec("size TestEnclave | awk 'NR==2{print $4}'");
+  size_t enclave_vsize = std::stoull(result);
+  sgxsan_error(enclave_vsize >= ENCLAVE_FAKE_SIZE,
+               "Enclave virtual size %zu >= ENCLAVE_FAKE_SIZE %zu, "
+               "increase ENCLAVE_FAKE_SIZE\n",
+               enclave_vsize, (size_t)ENCLAVE_FAKE_SIZE);
+
+  // Allocate proxy buffers (registered with libfuzzer once, never freed)
+  g_sancov_proxy_cntrs_start = (uint8_t *)calloc(1, cntrs_size);
+  g_sancov_proxy_pcs_start = (uintptr_t *)calloc(1, pcs_size);
+  sgxsan_error(!g_sancov_proxy_cntrs_start || !g_sancov_proxy_pcs_start,
+               "SancovInit: proxy buffer allocation failed\n");
+  g_sancov_proxy_cntrs_end = g_sancov_proxy_cntrs_start + cntrs_size;
+  g_sancov_proxy_pcs_end =
+      (uintptr_t *)((uint8_t *)g_sancov_proxy_pcs_start + pcs_size);
+
+  // Reserve fake address range to avoid collisions with real mappings
+  void *ret = mmap((void *)ENCLAVE_FAKE_BASE, ENCLAVE_FAKE_SIZE, PROT_NONE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+  sgxsan_error(ret == MAP_FAILED,
+               "SancovInit fatal: failed to reserve fake enclave base 0x%lx, "
+               "symbolization may be inaccurate\n",
+               ENCLAVE_FAKE_BASE);
+
+  // Register proxy with libfuzzer (RunInEnclave=false, hooks forward to real)
+  __sanitizer_cov_8bit_counters_init(g_sancov_proxy_cntrs_start,
+                                     g_sancov_proxy_cntrs_end);
+  __sanitizer_cov_pcs_init(g_sancov_proxy_pcs_start, g_sancov_proxy_pcs_end);
+}
+
+void DumpSancov() {
+  if (!g_sancov_proxy_cntrs_start || !g_sancov_enclave_cntrs_start)
+    return;
+
+  // Copy counters
+  size_t cntrs_size = g_sancov_proxy_cntrs_end - g_sancov_proxy_cntrs_start;
+  memcpy(g_sancov_proxy_cntrs_start, g_sancov_enclave_cntrs_start, cntrs_size);
+
+  // Copy PC table with normalization: absolute_pc -> (pc - base + FAKE_BASE)
+  uptr enclave_start = 0, enclave_end = 0;
+  gEnclaveInfo.GetEnclaveDSORange(&enclave_start, &enclave_end);
+
+  size_t n = g_sancov_proxy_pcs_end - g_sancov_proxy_pcs_start;
+  for (size_t i = 0; i + 1 < n; i += 2) {
+    uptr pc = g_sancov_enclave_pcs_start[i];
+    g_sancov_proxy_pcs_start[i] = (pc - enclave_start) + ENCLAVE_FAKE_BASE;
+    g_sancov_proxy_pcs_start[i + 1] = g_sancov_enclave_pcs_start[i + 1];
   }
 }
 
@@ -528,30 +630,14 @@ void __sanitizer_symbolize_pc(uptr pc, const char *fmt, char *out_buf,
     sym_info = it->second;
   } else {
     // Cache miss - perform symbolization
-    Dl_info info;
-    sym_info.has_module_info = (dladdr((void *)pc, &info) != 0);
     sym_info.func = "??";
     sym_info.file = "??";
     sym_info.line = "0";
 
-    if (sym_info.has_module_info) {
-      sym_info.module_path = info.dli_fname;
-      sym_info.module_base = (uptr)info.dli_fbase;
-      sym_info.is_pie_result = is_pie(info.dli_fname);
-
-      std::stringstream cmd;
-      if (sym_info.is_pie_result > 0) {
-        cmd << "llvm-addr2line-13 -afC --adjust-vma=0x" << std::hex
-            << sym_info.module_base << " -e " << sym_info.module_path << " "
-            << pc;
-      } else {
-        cmd << "llvm-addr2line-13 -afC -e " << sym_info.module_path << " "
-            << std::hex << pc;
-      }
-
-      // Get raw output
-      std::string output = sgxsan_exec(cmd.str().c_str());
-
+    if (resolve_module_info(pc, sym_info)) {
+      std::string output =
+          run_addr2line(sym_info.module_path.c_str(), pc,
+                        sym_info.is_pie_result, sym_info.module_base);
       // Parse output
       std::stringstream ss(output);
       std::string line_addr, line_func, line_file_loc;
@@ -668,31 +754,44 @@ void __sanitizer_symbolize_pc(uptr pc, const char *fmt, char *out_buf,
 int __sanitizer_get_module_and_offset_for_pc(uptr pc, char *module_name,
                                              uptr module_name_len,
                                              uptr *pc_offset) {
-  Dl_info info;
-  if (dladdr((void *)pc, &info) == 0) {
+  SymbolInfo sym_info;
+  if (!resolve_module_info(pc, sym_info)) {
     return false;
   }
 
   // Fill module name
   if (module_name && module_name_len) {
-    strncpy(module_name, info.dli_fname, module_name_len - 1);
+    strncpy(module_name, sym_info.module_path.c_str(), module_name_len - 1);
     module_name[module_name_len - 1] = '\0';
   }
 
   // Calculate offset
   if (pc_offset) {
-    if (is_pie(info.dli_fname) > 0) {
-      *pc_offset = pc - (uptr)info.dli_fbase; // Relative offset for libraries
-    } else {
-      *pc_offset = pc; // Absolute address for main app
-    }
+    *pc_offset = sym_info.is_pie_result > 0 ? pc - sym_info.module_base : pc;
   }
 
   return true;
 }
 
 void __asan_version_mismatch_check_v8() {}
-void __asan_handle_no_return() {}
-void __asan_before_dynamic_init(const char *module_name) {}
-void __asan_after_dynamic_init() {}
+void __asan_handle_no_return() {
+  if (!asan_inited)
+    return;
+  // Unpoison the current thread's stack before a noreturn call (e.g. exit,
+  // longjmp, throw) to prevent false positives when the stack is reused.
+  pthread_attr_t attr;
+  void *stack_addr;
+  size_t stack_size;
+  if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+    if (pthread_attr_getstack(&attr, &stack_addr, &stack_size) == 0) {
+      uptr stack_top = (uptr)stack_addr + stack_size;
+      int local_stack;
+      const uptr page_size = (uptr)getpagesize();
+      uptr current_bottom = ((uptr)&local_stack - page_size) & ~(page_size - 1);
+      if (current_bottom < stack_top)
+        PoisonShadow(current_bottom, stack_top - current_bottom, 0, true);
+    }
+    pthread_attr_destroy(&attr);
+  }
+}
 }

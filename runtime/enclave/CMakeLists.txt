@@ -32,5 +32,5 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}
 )
-add_library(SGXSanRTEnclave STATIC ${RT_ENCLAVE_SOURCE})
-set_target_properties(SGXSanRTEnclave PROPERTIES POSITION_INDEPENDENT_CODE True)
+add_library(sgxsan_enclave STATIC ${RT_ENCLAVE_SOURCE})
+set_target_properties(sgxsan_enclave PROPERTIES POSITION_INDEPENDENT_CODE True)
