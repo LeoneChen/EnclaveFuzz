@@ -1,3 +1,11 @@
+/// TSticker.cpp — Enclave 侧桩实现
+///
+/// 本文件在 Enclave SO 内部提供：
+///   - tsticker_ecall：Enclave 侧 ECall 分发入口（由 host 的 sgx_ecall 调用）
+///   - check_ecall：ECall 权限检查（private / allowed 列表）
+///   - __asan_init：ASan/SanitizerCoverage 初始化钩子
+///   - malloc/free/new/delete 拦截：将 Enclave 内分配路由到 SGXSan 堆分配器
+
 #include "Poison.h"
 #include "SGXSanRTApp.h"
 #include "Sticker.h"
@@ -11,46 +19,48 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/// Birdge Sticker
+/// ECall 函数指针类型（edger8r 生成的 Enclave 侧桩函数）
 typedef sgx_status_t (*ecall_func_t)(void *ms);
 extern const ecall_table_t g_ecall_table;
 extern entry_table_t g_dyn_entry_table;
+/// Enclave SECS（安全飞地控制结构）模拟对象
 secs_t g_secs;
 
+/// Enclave 内部初始化：将 g_secs 注册到 global_data_sim 并标记影子内存可访问
 static void SGXInitInternal() {
-  // Prepare necessary Enclave's state
   g_global_data_sim.secs_ptr = &g_secs;
   PoisonShadow((uptr)&g_secs, sizeof(g_secs), kAsanNotPoisonedMagic);
 }
 
+/// tsticker_ecall — Enclave 侧 ECall 分发
+/// ECMD_INIT_ENCLAVE 时执行初始化；其他 index 直接查表调用对应 ECall 函数
 extern "C" sgx_status_t tsticker_ecall(const sgx_enclave_id_t eid,
                                        const int index, const void *ocall_table,
                                        void *ms) {
-  sgx_status_t result = SGX_ERROR_UNEXPECTED;
   if (index == ECMD_INIT_ENCLAVE) {
     SGXInitInternal();
-    result = SGX_SUCCESS;
-  } else {
-    assert(index < (int)g_ecall_table.nr_ecall);
-    result = ((ecall_func_t)g_ecall_table.ecall_table[index].ecall_addr)(ms);
+    return SGX_SUCCESS;
   }
-  return result;
+  assert(index < (int)g_ecall_table.nr_ecall);
+  return ((ecall_func_t)g_ecall_table.ecall_table[index].ecall_addr)(ms);
 }
 
-/// @brief Must called before SanitizerCoverage's ctors, since in this function
-/// I hook callbacks in these ctors.
+/// __asan_init — ASan 初始化钩子（必须在 SanitizerCoverage 构造函数之前执行）
+/// 在此注册信号处理器并对 Enclave DSO 代码段写影子内存标记。
+/// gAlreadyAsanInited 驻留在 Enclave 镜像中，每次 dlopen 加载后重置为 false。
 extern "C" void __asan_init() {
-  // gAlreadyAsanInited should reside in Enclave image, since we should set it
-  // to false whenever we load Enclave image and call __asan_init
   static bool gAlreadyAsanInited = false;
-  if (gAlreadyAsanInited == false) {
+  if (!gAlreadyAsanInited) {
     register_sgxsan_sigaction();
     gEnclaveInfo.PoisonEnclaveDSOCode();
     gAlreadyAsanInited = true;
   }
 }
 
-extern "C" bool check_ecall(ECallCheckType ty, uint32_t targetECallIdx,
+/// check_ecall — ECall 权限检查
+///   CHECK_ECALL_PRIVATE：目标 ECall 是否为 private（不允许根调用）
+///   CHECK_ECALL_ALLOWED：当前 OCall 的 allowed_ecall 表中是否包含目标 ECall
+extern "C" bool check_ecall(ECallCheck ty, uint32_t targetECallIdx,
                             unsigned int curOCallIdx) {
   switch (ty) {
   case CHECK_ECALL_PRIVATE: {
@@ -66,6 +76,9 @@ extern "C" bool check_ecall(ECallCheckType ty, uint32_t targetECallIdx,
   }
   }
 }
+
+// ── malloc/free 拦截 ──────────────────────────────────────────────────────
+// 将 Enclave 内的 libc 分配函数路由到 SGXSan 堆分配器（带影子内存标记）
 
 extern "C" {
 void *sgxsan_malloc_raw(size_t size, uptr alignment);
@@ -90,8 +103,8 @@ void *realloc(void *oldmem, size_t bytes) {
 size_t sgxsan_malloc_usable_size(void *mem);
 size_t malloc_usable_size(void *mem) { return sgxsan_malloc_usable_size(mem); }
 
-// Intercept enclave DSO's sancov registrations via protected visibility.
-// Within this DSO, all calls bind to these definitions instead of libfuzzer's.
+/// sancov 拦截：通过 protected 可见性将 Enclave DSO 内的 sancov 注册
+/// 绑定到本文件的实现，转发给 host 侧代理缓冲区，而非直接注册给 libfuzzer
 __attribute__((visibility("protected"))) void
 __sanitizer_cov_8bit_counters_init(uint8_t *Start, uint8_t *Stop) {
   SGXSanSaveEnclaveCntrsRange(Start, Stop);
@@ -102,6 +115,8 @@ __sanitizer_cov_pcs_init(const uintptr_t *Start, const uintptr_t *Stop) {
   SGXSanSaveEnclavePCsRange(Start, Stop);
 }
 }
+
+// ── C++ new/delete 拦截 ───────────────────────────────────────────────────
 
 void *operator new(size_t size) {
   void *ptr = sgxsan_malloc(size);

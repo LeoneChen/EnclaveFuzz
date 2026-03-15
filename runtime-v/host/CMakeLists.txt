@@ -13,10 +13,14 @@ include_directories(
 )
 
 add_library(
-    sgxsan_host_v STATIC 
+    sgxsan_host_v STATIC
     Malloc.cpp
+    Quarantine.cpp
     Poison.cpp
     PoisonCheck.cpp
+    InstrumentedLibc.cpp
+    ErrorReport.cpp
+    Symbolizer.cpp
     SGXSanRTApp.cpp
     MemAccessMgr.cpp
     Sticker.cpp

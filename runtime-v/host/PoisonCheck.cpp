@@ -1,59 +1,71 @@
+/// PoisonCheck.cpp — ASan 内存访问插桩回调与影子内存状态查询实现
+///
+/// ASAN_MEMORY_ACCESS_CALLBACK 宏展开为 __asan_load{1,2,4,8,16} /
+/// __asan_store{1,2,4,8,16} 函数，由 ASan Pass 在每次内存访问前插入调用。
+/// 每个函数：
+///   1. 检查地址合法性
+///   2. 读取对应影子字节
+///   3. 根据 L0 位判断是 Enclave / Host 访问，通知 MemAccessMgr
+///   4. 根据 L1 位判断是否越界，越界则上报错误
+
 #include "PoisonCheck.h"
 #include "MemAccessMgr.h"
 #include "Poison.h"
 #include "SGXSanRTApp.h"
-#include "Sticker.h"
-#include <algorithm>
-#include <assert.h>
-#include <stdarg.h>
-#include <string.h>
-#include <tuple>
 
-// -------------------------- Run-time entry ------------------- {{{1
-// exported functions
-// memory access callback
+// ── ASan 定长内存访问插桩回调 ─────────────────────────────────────────────
+
+/// ASAN_MEMORY_ACCESS_CALLBACK：为每个访问大小生成一个插桩函数
+/// is_control_fetch=true 表示本次访问的值将用于条件比较（double-fetch
+/// 检测的"控制流读取"）
 #define ASAN_MEMORY_ACCESS_CALLBACK(type, is_write, size)                      \
-  extern "C" __attribute__((noinline)) void __asan_##type##size(uptr addr,     \
-                                                                bool toCmp) {  \
+  extern "C" __attribute__((noinline)) void __asan_##type##size(               \
+      uptr addr, bool is_control_fetch) {                                      \
     if (UNLIKELY(not AddrIsInMem(addr))) {                                     \
       GET_CALLER_PC_BP_SP;                                                     \
-      ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
-                         "Invalid address");                                   \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, "Invalid address"); \
     }                                                                          \
-    uptr shadowMapPtr = MEM_TO_SHADOW(addr), shadowByte, inEnclaveFlag;        \
+    uptr shadow_addr = MEM_TO_SHADOW(addr), shadow_byte, enclave_flag;         \
+    /* 对于 size <= 8，读一个影子字节；>8 读两个（uint16_t） */                \
     if (size <= SHADOW_GRANULARITY) {                                          \
-      shadowByte = *(uint8_t *)shadowMapPtr;                                   \
-      inEnclaveFlag = kSGXSanInEnclaveMagic;                                   \
+      shadow_byte = *(uint8_t *)shadow_addr;                                   \
+      enclave_flag = kSGXSanInEnclaveMagic;                                    \
     } else {                                                                   \
-      shadowByte = *(uint16_t *)shadowMapPtr;                                  \
-      inEnclaveFlag = (kSGXSanInEnclaveMagic << 8) + kSGXSanInEnclaveMagic;    \
+      shadow_byte = *(uint16_t *)shadow_addr;                                  \
+      enclave_flag = (kSGXSanInEnclaveMagic << 8) + kSGXSanInEnclaveMagic;     \
     }                                                                          \
-    if (shadowByte == inEnclaveFlag) {                                         \
+    /* 快速路径：影子字节完全等于 InEnclave 魔数或 0 */                        \
+    if (shadow_byte == enclave_flag) {                                         \
       MemAccessMgrInEnclaveAccess();                                           \
-    } else if (shadowByte == 0) {                                              \
-      MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp);       \
+    } else if (shadow_byte == 0) {                                             \
+      MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write,               \
+                                   is_control_fetch);                          \
     } else {                                                                   \
-      uptr IsInEnclave = shadowByte & inEnclaveFlag;                           \
-      if (IsInEnclave == inEnclaveFlag) {                                      \
+      /* 慢速路径：提取 L0 位判断 Enclave/Host 侧，再检查 L1 越界位 */         \
+      uptr is_in_enclave = shadow_byte & enclave_flag;                         \
+      if (is_in_enclave == enclave_flag) {                                     \
         MemAccessMgrInEnclaveAccess();                                         \
-      } else if (IsInEnclave == 0) {                                           \
-        MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp);     \
+      } else if (is_in_enclave == 0) {                                         \
+        MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write,             \
+                                     is_control_fetch);                        \
       } else {                                                                 \
+        /* L0 位混合：部分字节在 Enclave、部分在 Host，提示跨边界 OOB */       \
         GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, addr, is_write, size, true,             \
-                           "Mixed Access");                                    \
+        ReportGenericError(pc, bp, sp, addr, is_write, size, "Mixed Access");  \
       }                                                                        \
-      uptr filter = size <= SHADOW_GRANULARITY                                 \
-                        ? kL1Filter                                            \
-                        : ((kL1Filter << 8) + kL1Filter);                      \
-      shadowByte &= filter;                                                    \
-      if (UNLIKELY(shadowByte)) {                                              \
+      /* 提取 L1 越界位 */                                                     \
+      uptr l1_mask = size <= SHADOW_GRANULARITY                                \
+                         ? kL1Filter                                           \
+                         : ((kL1Filter << 8) + kL1Filter);                     \
+      shadow_byte &= l1_mask;                                                  \
+      if (UNLIKELY(shadow_byte)) {                                             \
+        /* 判断访问是否触及已毒化字节 */                                       \
         if (UNLIKELY(size >= SHADOW_GRANULARITY ||                             \
                      (int8_t)((addr & (SHADOW_GRANULARITY - 1)) + size - 1) >= \
-                         (int8_t)shadowByte)) {                                \
+                         (int8_t)shadow_byte)) {                               \
           GET_CALLER_PC_BP_SP;                                                 \
-          ReportGenericError(pc, bp, sp, addr, is_write, size, true,           \
-                             IsInEnclave == inEnclaveFlag                      \
+          ReportGenericError(pc, bp, sp, addr, is_write, size,                 \
+                             is_in_enclave == enclave_flag                     \
                                  ? "Enclave out of bound"                      \
                                  : "Host out of bound");                       \
         }                                                                      \
@@ -72,180 +84,177 @@ ASAN_MEMORY_ACCESS_CALLBACK(store, true, 4)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 8)
 ASAN_MEMORY_ACCESS_CALLBACK(store, true, 16)
 
+// ── ASan 变长内存访问插桩回调 ─────────────────────────────────────────────
+
+/// ASAN_MEMORY_ACCESS_CALLBACK_N：处理任意大小的内存访问（memcpy 等）
+/// 使用 QueryRegion 做完整区间检查
 #define ASAN_MEMORY_ACCESS_CALLBACK_N(type, is_write)                          \
   extern "C" __attribute__((noinline)) void __asan_##type##N(                  \
-      uptr addr, uptr size, bool toCmp) {                                      \
+      uptr addr, uptr size, bool is_control_fetch) {                           \
     if (UNLIKELY(not AddrIsInMem(addr))) {                                     \
       GET_CALLER_PC_BP_SP;                                                     \
-      ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
-                         "Invalid address");                                   \
+      ReportGenericError(pc, bp, sp, addr, is_write, size, "Invalid address"); \
     }                                                                          \
-    InOutEnclaveStatus addrInOutEnclaveStatus;                                 \
+    EnclaveStatus addrEnclaveStatus;                                           \
     PoisonStatus addrPoisonStatus;                                             \
-    RegionInOutEnclaveStatusAndPoisonStatus(                                   \
-        addr, size, addrInOutEnclaveStatus, addrPoisonStatus);                 \
-    if (addrInOutEnclaveStatus == InEnclave) {                                 \
+    QueryRegion(addr, size, addrEnclaveStatus, addrPoisonStatus);              \
+    if (addrEnclaveStatus == InEnclave) {                                      \
       MemAccessMgrInEnclaveAccess();                                           \
       if (addrPoisonStatus != NotPoisoned) {                                   \
         GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, addr, is_write, size, true,             \
+        ReportGenericError(pc, bp, sp, addr, is_write, size,                   \
                            "Enclave out of bound");                            \
       }                                                                        \
-    } else if (addrInOutEnclaveStatus == OutEnclave) {                         \
-      MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write, toCmp);       \
+    } else if (addrEnclaveStatus == OutEnclave) {                              \
+      MemAccessMgrOutEnclaveAccess((void *)addr, size, is_write,               \
+                                   is_control_fetch);                          \
       if (addrPoisonStatus != NotPoisoned) {                                   \
         GET_CALLER_PC_BP_SP;                                                   \
-        ReportGenericError(pc, bp, sp, addr, is_write, size, true,             \
+        ReportGenericError(pc, bp, sp, addr, is_write, size,                   \
                            "Host out of bound");                               \
       }                                                                        \
-    } else if (addrInOutEnclaveStatus == RangeMixedInOutEnclave) {             \
+    } else if (addrEnclaveStatus == RangeMixedInOutEnclave) {                  \
       GET_CALLER_PC_BP_SP;                                                     \
-      ReportGenericError(pc, bp, sp, addr, is_write, size, true,               \
+      ReportGenericError(pc, bp, sp, addr, is_write, size,                     \
                          "RangeMixedInOutEnclave hint OOB");                   \
     } else {                                                                   \
       GET_CALLER_PC_BP_SP;                                                     \
-      ReportError(pc, bp, sp, addr, is_write, size,                            \
-                  "addrInOutEnclaveStatus: %d", addrInOutEnclaveStatus);       \
+      ReportGenericError(pc, bp, sp, addr, is_write, size,                     \
+                         "addrEnclaveStatus: %d", addrEnclaveStatus);          \
     }                                                                          \
   }
 
 ASAN_MEMORY_ACCESS_CALLBACK_N(load, false)
 ASAN_MEMORY_ACCESS_CALLBACK_N(store, true)
 
-void AddressInOutEnclaveStatusAndPoisonStatus(
-    uptr addr, InOutEnclaveStatus &addrInOutEnclaveStatus,
-    PoisonStatus &addrPoisonStatus) {
+// ── 影子内存状态查询实现 ──────────────────────────────────────────────────
+
+/// 查询单个地址的 InOutEnclave 状态和毒化状态
+/// 先处理两个快速路径（纯 InEnclave 魔数 / 纯 0），再处理混合情况
+void QueryAddr(uptr addr, EnclaveStatus &status, PoisonStatus &poison) {
   int8_t shadow_value = *(int8_t *)MEM_TO_SHADOW(addr);
   if (shadow_value == kSGXSanInEnclaveMagic) {
-    // early found just in Enclave, filter is needn't to use
-    addrInOutEnclaveStatus = InEnclave;
-    addrPoisonStatus = NotPoisoned;
+    // 快速路径：完整 InEnclave，无需检查 L1 位
+    status = InEnclave;
+    poison = NotPoisoned;
   } else if (shadow_value == 0) {
-    addrInOutEnclaveStatus = OutEnclave;
-    addrPoisonStatus = NotPoisoned;
+    status = OutEnclave;
+    poison = NotPoisoned;
   } else {
-    addrInOutEnclaveStatus = L0F(shadow_value) ? InEnclave : OutEnclave;
+    // 通用路径：分别提取 L0 和 L1 位
+    status = L0F(shadow_value) ? InEnclave : OutEnclave;
 
     shadow_value &= kL1Filter;
     if (LIKELY(shadow_value == 0)) {
-      addrPoisonStatus = NotPoisoned;
+      poison = NotPoisoned;
     } else {
-      int8_t L1Bits = L1F(shadow_value);
-      // last_accessed_byte should <= SHADOW_GRANULARITY - 1 (i.e. 0x7)
-      uint8_t last_accessed_byte = addr & (SHADOW_GRANULARITY - 1);
-      addrPoisonStatus =
-          last_accessed_byte >= L1Bits ? IsPoisoned : NotPoisoned;
+      int8_t accessible_bytes = shadow_value;
+      // accessible_bytes：该粒度内前 N 字节可访问，其余已毒化
+      uint8_t granule_offset = addr & (SHADOW_GRANULARITY - 1);
+      poison = granule_offset >= accessible_bytes ? IsPoisoned : NotPoisoned;
     }
   }
 }
 
-void ShadowRegionInOutEnclaveStatusAndStrictPoisonStatus(
-    uint8_t *beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
-    PoisonStatus &regionPoisonStatus) {
-  // beg is nullptr when ShadowMap start from 0?
+/// 检查影子内存区间 [beg, beg+size) 中所有字节的状态
+/// 通过位运算批量检测：allBitOr 有任一置位则可能毒化，L0F 混合则跨边界
+void QueryShadowRegion(uint8_t *beg, uptr size, EnclaveStatus &status,
+                       PoisonStatus &poison) {
   if (size == 0) {
-    regionInOutEnclaveStatus = UnknownInOutEnclaveStatus;
-    regionPoisonStatus = UnknownPoisonStatus;
+    status = UnknownEnclaveStatus;
+    poison = UnknownPoisonStatus;
   } else if (size > (1ULL << 40)) {
-    // Sanity check
-    regionInOutEnclaveStatus = RangeOverflow;
-    regionPoisonStatus = UnknownPoisonStatus;
+    // 合理性检查：超过 1TB 的影子区间视为溢出
+    status = RangeOverflow;
+    poison = UnknownPoisonStatus;
   } else {
-    uint8_t *end = beg + size; // offset by 1
-    uint8_t allBitOr = 0, allBitAnd = ~0;
+    uint8_t *end = beg + size;
+    uint8_t all_or = 0, all_and = ~0;
     for (uint8_t *mem = beg; mem < end; mem++) {
-      allBitOr |= *mem;
-      allBitAnd &= *mem;
+      all_or |= *mem;
+      all_and &= *mem;
     }
-    if (L0F(allBitOr) != L0F(allBitAnd)) {
-      regionInOutEnclaveStatus = RangeMixedInOutEnclave;
-      regionPoisonStatus = UnknownPoisonStatus;
-    } else if (allBitOr == kSGXSanInEnclaveMagic) {
-      regionInOutEnclaveStatus = InEnclave;
-      regionPoisonStatus = NotPoisoned;
-    } else if (allBitOr == 0) {
-      regionInOutEnclaveStatus = OutEnclave;
-      regionPoisonStatus = NotPoisoned;
+    if (L0F(all_or) != L0F(all_and)) {
+      // L0 位不一致：区间内混合了 Enclave 和 Host 内存
+      status = RangeMixedInOutEnclave;
+      poison = UnknownPoisonStatus;
+    } else if (all_or == kSGXSanInEnclaveMagic) {
+      status = InEnclave;
+      poison = NotPoisoned;
+    } else if (all_or == 0) {
+      status = OutEnclave;
+      poison = NotPoisoned;
     } else {
-      if (L0F(allBitOr) == 0) {
-        regionInOutEnclaveStatus = OutEnclave;
-      } else if (L0F(allBitOr) == kSGXSanInEnclaveMagic) {
-        regionInOutEnclaveStatus = InEnclave;
+      if (L0F(all_or) == 0) {
+        status = OutEnclave;
+      } else if (L0F(all_or) == kSGXSanInEnclaveMagic) {
+        status = InEnclave;
       } else {
         sgxsan_error(true, "Ranged mixed?");
       }
-      regionPoisonStatus = L1F(allBitOr) ? IsPoisoned : NotPoisoned;
+      // L1 位有置位则说明区间内存在毒化字节
+      poison = L1F(all_or) ? IsPoisoned : NotPoisoned;
     }
   }
 }
 
-void RegionInOutEnclaveStatusAndPoisonStatus(
-    uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
-    PoisonStatus &regionPoisonStatus) {
-  // Early error
+/// 检查应用内存区间 [beg, beg+size) 的完整状态
+/// 策略：先单独检查首尾字节，再对中间对齐段调用 Shadow 版本
+void QueryRegion(uptr beg, uptr size, EnclaveStatus &status,
+                 PoisonStatus &poison) {
   if (beg == 0) {
-    regionInOutEnclaveStatus = OutEnclave;
-    regionPoisonStatus = IsPoisoned;
+    // 空指针视为 Host 侧已毒化
+    status = OutEnclave;
+    poison = IsPoisoned;
   } else if (size == 0) {
-    regionInOutEnclaveStatus = UnknownInOutEnclaveStatus;
-    regionPoisonStatus = UnknownPoisonStatus;
+    status = UnknownEnclaveStatus;
+    poison = UnknownPoisonStatus;
   } else {
-    uptr end =
-        beg + size; // Offset by one. A offset-by-one bug in original ASan?
+    uptr end = beg + size; // 半开区间 [beg, end)，end 指向最后一个字节的下一位
     if (beg > end) {
-      regionInOutEnclaveStatus = RangeOverflow;
-      regionPoisonStatus = UnknownPoisonStatus;
+      status = RangeOverflow;
+      poison = UnknownPoisonStatus;
     } else if (not(AddrIsInMem(beg) and AddrIsInMem(end - 1))) {
-      regionInOutEnclaveStatus = RangeInvalid;
-      regionPoisonStatus = UnknownPoisonStatus;
+      status = RangeInvalid;
+      poison = UnknownPoisonStatus;
     } else {
-      InOutEnclaveStatus begInOutEnclaveStatus, endInOutEnclaveStatus,
-          alignedRegionInOutEnclaveStatus;
-      PoisonStatus begPoisonStatus, endPoisonStatus, alignedRegionPoisonStatus;
+      EnclaveStatus beg_status, end_status, mid_status;
+      PoisonStatus beg_poison, end_poison, mid_poison;
 
-      /// Full check
+      // 对齐边界：[aligned_b, aligned_e] 是中间完整粒度段的应用地址范围
       uptr aligned_b = RoundUpTo(beg, SHADOW_GRANULARITY);
       uptr aligned_e = RoundDownTo(end - 1, SHADOW_GRANULARITY);
       uptr shadow_beg = MemToShadow(aligned_b);
       uptr shadow_end = MemToShadow(aligned_e);
 
-      // First check the first and the last application bytes,
-      // then check the SHADOW_GRANULARITY-aligned region
-      AddressInOutEnclaveStatusAndPoisonStatus(beg, begInOutEnclaveStatus,
-                                               begPoisonStatus);
-      AddressInOutEnclaveStatusAndPoisonStatus(end - 1, endInOutEnclaveStatus,
-                                               endPoisonStatus);
-      // make sure all bytes at same side
-      if (begInOutEnclaveStatus != endInOutEnclaveStatus) {
-        regionInOutEnclaveStatus = RangeMixedInOutEnclave;
-        regionPoisonStatus = UnknownPoisonStatus;
+      // 检查首尾字节（可能位于粒度内部的非对齐位置）
+      QueryAddr(beg, beg_status, beg_poison);
+      QueryAddr(end - 1, end_status, end_poison);
+      // 首尾必须在同一侧，否则判定为跨边界访问
+      if (beg_status != end_status) {
+        status = RangeMixedInOutEnclave;
+        poison = UnknownPoisonStatus;
       } else {
         if (shadow_end <= shadow_beg) {
-          // already check each ShadowByte
-          regionInOutEnclaveStatus = begInOutEnclaveStatus;
-          regionPoisonStatus =
-              (begPoisonStatus or endPoisonStatus) ? IsPoisoned : NotPoisoned;
+          // 区间过小，首尾已覆盖所有影子字节，无需检查中间段
+          status = beg_status;
+          poison = (beg_poison or end_poison) ? IsPoisoned : NotPoisoned;
         } else {
-          // need to check granuality-aligned shadow value
-          ShadowRegionInOutEnclaveStatusAndStrictPoisonStatus(
-              (uint8_t *)shadow_beg, shadow_end - shadow_beg,
-              alignedRegionInOutEnclaveStatus, alignedRegionPoisonStatus);
-          // make sure all bytes at same side
-          if (begInOutEnclaveStatus != alignedRegionInOutEnclaveStatus) {
-            if (alignedRegionInOutEnclaveStatus == InEnclave or
-                alignedRegionInOutEnclaveStatus == OutEnclave or
-                alignedRegionInOutEnclaveStatus == RangeMixedInOutEnclave) {
-              regionInOutEnclaveStatus = RangeMixedInOutEnclave;
+          // 检查中间对齐段
+          QueryShadowRegion((uint8_t *)shadow_beg, shadow_end - shadow_beg,
+                            mid_status, mid_poison);
+          if (beg_status != mid_status) {
+            if (mid_status == InEnclave or mid_status == OutEnclave or
+                mid_status == RangeMixedInOutEnclave) {
+              status = RangeMixedInOutEnclave;
             } else {
-              regionInOutEnclaveStatus = alignedRegionInOutEnclaveStatus;
+              status = mid_status;
             }
-            regionPoisonStatus = UnknownPoisonStatus;
+            poison = UnknownPoisonStatus;
           } else {
-            regionInOutEnclaveStatus = begInOutEnclaveStatus;
-            regionPoisonStatus = (begPoisonStatus or endPoisonStatus or
-                                  alignedRegionPoisonStatus)
-                                     ? IsPoisoned
-                                     : NotPoisoned;
+            status = beg_status;
+            poison = (beg_poison or end_poison or mid_poison) ? IsPoisoned
+                                                              : NotPoisoned;
           }
         }
       }
@@ -253,27 +262,24 @@ void RegionInOutEnclaveStatusAndPoisonStatus(
   }
 }
 
-void RegionInOutEnclaveStatusAndPoisonedAddr(
-    uptr beg, uptr size, InOutEnclaveStatus &regionInOutEnclaveStatus,
-    uptr &regionFirstPoisonedAddr) {
-  InOutEnclaveStatus pos;
+/// 在 QueryRegion 基础上，
+/// 进一步逐字节扫描定位第一个被毒化的地址
+void FindFirstPoisoned(uptr beg, uptr size, EnclaveStatus &status,
+                       uptr &first_poisoned) {
   PoisonStatus poison;
-  RegionInOutEnclaveStatusAndPoisonStatus(beg, size, regionInOutEnclaveStatus,
-                                          poison);
-  regionFirstPoisonedAddr = poison;
+  QueryRegion(beg, size, status, poison);
+  first_poisoned = poison; // 初始值：0=未毒化，1=已毒化（未定位具体地址）
 
   uptr end = beg + size;
-  if (((regionInOutEnclaveStatus == InEnclave or
-        regionInOutEnclaveStatus == OutEnclave) and
+  if (((status == InEnclave or status == OutEnclave) and
        poison == IsPoisoned) or
-      regionInOutEnclaveStatus == RangeMixedInOutEnclave) {
-    // must be poisoned
-    // The fast check failed, so we have a poisoned byte somewhere.
-    // Find it slowly.
+      status == RangeMixedInOutEnclave) {
+    // 快速检查确认有毒化，逐字节扫描找到第一个毒化地址
     for (; beg < end; beg++) {
-      AddressInOutEnclaveStatusAndPoisonStatus(beg, pos, poison);
+      EnclaveStatus unused;
+      QueryAddr(beg, unused, poison);
       if (poison == IsPoisoned) {
-        regionFirstPoisonedAddr = beg;
+        first_poisoned = beg;
         return;
       }
     }
@@ -281,548 +287,23 @@ void RegionInOutEnclaveStatusAndPoisonedAddr(
   }
 }
 
-int sgx_is_within_enclave(const void *addr, size_t size) {
-  if (size == 0) {
-    // Note: If size is zero, check one byte
+// ── sgx_is_within_enclave / sgx_is_outside_enclave ───────────────────────
+
+/// 替代 SGX SDK 同名函数，通过影子内存判断地址是否完全在 Enclave 内
+/// size=0 时检查 1 字节（与 SDK 行为一致）
+static EnclaveStatus getRegionStatus(const void *addr, size_t size) {
+  if (size == 0)
     size = 1;
-  }
-  InOutEnclaveStatus addrInOutEnclaveStatus;
-  PoisonStatus addrPoisonStatus;
-  RegionInOutEnclaveStatusAndPoisonStatus(
-      (uptr)addr, size, addrInOutEnclaveStatus, addrPoisonStatus);
-  if (addrInOutEnclaveStatus == InEnclave)
-    return 1;
-  else
-    return 0;
+  EnclaveStatus status;
+  PoisonStatus poison;
+  QueryRegion((uptr)addr, size, status, poison);
+  return status;
+}
+
+int sgx_is_within_enclave(const void *addr, size_t size) {
+  return getRegionStatus(addr, size) == InEnclave ? 1 : 0;
 }
 
 int sgx_is_outside_enclave(const void *addr, size_t size) {
-  if (size == 0) {
-    // Note: If size is zero, check one byte
-    size = 1;
-  }
-  InOutEnclaveStatus addrInOutEnclaveStatus;
-  PoisonStatus addrPoisonStatus;
-  RegionInOutEnclaveStatusAndPoisonStatus(
-      (uptr)addr, size, addrInOutEnclaveStatus, addrPoisonStatus);
-  if (addrInOutEnclaveStatus == OutEnclave)
-    return 1;
-  else
-    return 0;
-}
-
-extern "C" {
-/// Memory Intrinsics Callback
-void *__asan_memcpy(void *dst, const void *src, uptr size) {
-  if (size == 0)
-    return dst;
-  if (LIKELY(asan_inited)) {
-    if (dst != src) {
-      if (RangesOverlap((const char *)dst, size, (const char *)src, size)) {
-        GET_CALLER_PC_BP_SP;
-        sgxsan_error(
-            true,
-            "%p:%lu overlap with %p:%lu at pc %p (bp = 0x%lx sp = 0x%lx)\n",
-            dst, size, src, size, (void *)pc, bp, sp);
-      }
-    }
-    InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
-    uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  return memcpy(dst, src, size);
-}
-
-void *__asan_memset(void *dst, int c, uptr size) {
-  if (size == 0)
-    return dst;
-  if (LIKELY(asan_inited)) {
-    InOutEnclaveStatus dstInOutEnclaveStatus;
-    uptr dstPoisonedAddr;
-    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  return memset(dst, c, size);
-}
-
-void *__asan_memmove(void *dst, const void *src, uptr size) {
-  if (size == 0)
-    return dst;
-  if (LIKELY(asan_inited)) {
-    InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
-    uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, size, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, size, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  return memmove(dst, src, size);
-}
-
-typedef error_t errno_t;
-extern errno_t memcpy_s(void *dst, size_t sizeInBytes, const void *src,
-                        size_t count);
-extern errno_t memmove_s(void *dst, size_t sizeInBytes, const void *src,
-                         size_t count);
-extern errno_t memset_s(void *s, size_t smax, int c, size_t n);
-extern errno_t strcpy_s(char *dst, size_t dstSize, const char *src);
-extern errno_t strncpy_s(char *dst, size_t dstSize, const char *src,
-                         size_t count);
-extern errno_t strcat_s(char *dst, size_t dstSize, const char *src);
-extern errno_t strncat_s(char *dst, size_t dstSize, const char *src,
-                         size_t count);
-extern size_t strlcpy(char *dst, const char *src, size_t dsize);
-
-errno_t __sgxsan_memcpy_s(void *dst, size_t dstSize, const void *src,
-                          size_t count) {
-  if (dstSize == 0 or count == 0)
-    return 0;
-  if (LIKELY(asan_inited)) {
-    if (dst != src) {
-      if (RangesOverlap((const char *)dst, dstSize, (const char *)src, count)) {
-        GET_CALLER_PC_BP_SP;
-        sgxsan_error(true,
-                     "[%s] %p:%lu overlap with %p:%lu at pc %p (bp = 0x%lx sp "
-                     "= 0x%lx)\n",
-                     "memcpy_s", dst, dstSize, src, count, (void *)pc, bp, sp);
-      }
-    }
-    InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
-    uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  return memcpy_s(dst, dstSize, src, count);
-}
-
-errno_t __sgxsan_memset_s(void *dst, size_t dstSize, int c, size_t n) {
-  if (dstSize == 0 or n == 0)
-    return 0;
-  if (LIKELY(asan_inited)) {
-    InOutEnclaveStatus dstInOutEnclaveStatus;
-    uptr dstPoisonedAddr;
-    RANGE_CHECK(dst, std::max(dstSize, n), dstInOutEnclaveStatus,
-                dstPoisonedAddr, true);
-  }
-  return memset_s(dst, dstSize, c, n);
-}
-
-errno_t __sgxsan_memmove_s(void *dst, size_t dstSize, const void *src,
-                           size_t count) {
-  if (dstSize == 0 or count == 0)
-    return 0;
-  if (LIKELY(asan_inited)) {
-    InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
-    uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, count, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  return memmove_s(dst, dstSize, src, count);
-}
-
-//==============================================================================
-// 3. Fixed-Size Memory and String Operations
-//==============================================================================
-
-int __sgxsan_memcmp(const void *s1, const void *s2, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus s1InOutEnclaveStatus, s2InOutEnclaveStatus;
-    uptr s1PoisonedAddr, s2PoisonedAddr;
-    RANGE_CHECK(s1, n, s1InOutEnclaveStatus, s1PoisonedAddr, false);
-    RANGE_CHECK(s2, n, s2InOutEnclaveStatus, s2PoisonedAddr, false);
-  }
-  return memcmp(s1, s2, n);
-}
-
-void *__sgxsan_memchr(const void *s, int c, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus sInOutEnclaveStatus;
-    uptr sPoisonedAddr;
-    RANGE_CHECK(s, n, sInOutEnclaveStatus, sPoisonedAddr, false);
-  }
-  return (void *)memchr(s, c, n);
-}
-
-int __sgxsan_bcmp(const void *s1, const void *s2, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus s1InOutEnclaveStatus, s2InOutEnclaveStatus;
-    uptr s1PoisonedAddr, s2PoisonedAddr;
-    RANGE_CHECK(s1, n, s1InOutEnclaveStatus, s1PoisonedAddr, false);
-    RANGE_CHECK(s2, n, s2InOutEnclaveStatus, s2PoisonedAddr, false);
-  }
-  return bcmp(s1, s2, n);
-}
-
-char *__sgxsan_strncpy(char *dst, const char *src, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus dstInOutEnclaveStatus;
-    uptr dstPoisonedAddr;
-    RANGE_CHECK(dst, n, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-    size_t src_len = strnlen(src, n);
-    size_t src_read = src_len < n ? src_len + 1 : n;
-    InOutEnclaveStatus srcInOutEnclaveStatus;
-    uptr srcPoisonedAddr;
-    RANGE_CHECK(src, src_read, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-  }
-  return strncpy(dst, src, n);
-}
-
-char *__sgxsan_stpncpy(char *dst, const char *src, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus dstInOutEnclaveStatus;
-    uptr dstPoisonedAddr;
-    RANGE_CHECK(dst, n, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-    size_t src_len = strnlen(src, n);
-    size_t src_read = src_len < n ? src_len + 1 : n;
-    InOutEnclaveStatus srcInOutEnclaveStatus;
-    uptr srcPoisonedAddr;
-    RANGE_CHECK(src, src_read, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-  }
-  return stpncpy(dst, src, n);
-}
-
-int __sgxsan_strncmp(const char *s1, const char *s2, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    size_t len1 = strnlen(s1, n);
-    size_t read1 = len1 < n ? len1 + 1 : n;
-    InOutEnclaveStatus s1InOutEnclaveStatus;
-    uptr s1PoisonedAddr;
-    RANGE_CHECK(s1, read1, s1InOutEnclaveStatus, s1PoisonedAddr, false);
-    size_t len2 = strnlen(s2, n);
-    size_t read2 = len2 < n ? len2 + 1 : n;
-    InOutEnclaveStatus s2InOutEnclaveStatus;
-    uptr s2PoisonedAddr;
-    RANGE_CHECK(s2, read2, s2InOutEnclaveStatus, s2PoisonedAddr, false);
-  }
-  return strncmp(s1, s2, n);
-}
-
-size_t __sgxsan_strnlen(const char *s, size_t maxlen) {
-  size_t result = strnlen(s, maxlen);
-  if (maxlen != 0 && LIKELY(asan_inited)) {
-    size_t read_size = result < maxlen ? result + 1 : maxlen;
-    InOutEnclaveStatus sInOutEnclaveStatus;
-    uptr sPoisonedAddr;
-    RANGE_CHECK(s, read_size, sInOutEnclaveStatus, sPoisonedAddr, false);
-  }
-  return result;
-}
-
-char *__sgxsan_strncat(char *dst, const char *src, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    size_t dst_len = strlen(dst);
-    InOutEnclaveStatus dstReadInOutEnclaveStatus;
-    uptr dstReadPoisonedAddr;
-    RANGE_CHECK(dst, dst_len + 1, dstReadInOutEnclaveStatus,
-                dstReadPoisonedAddr, false);
-    size_t src_len = strnlen(src, n);
-    size_t src_read = src_len < n ? src_len + 1 : n;
-    InOutEnclaveStatus srcInOutEnclaveStatus;
-    uptr srcPoisonedAddr;
-    RANGE_CHECK(src, src_read, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    InOutEnclaveStatus dstWriteInOutEnclaveStatus;
-    uptr dstWritePoisonedAddr;
-    RANGE_CHECK(dst, dst_len + n + 1, dstWriteInOutEnclaveStatus,
-                dstWritePoisonedAddr, true);
-  }
-  return strncat(dst, src, n);
-}
-
-char *__sgxsan_strndup(const char *s, size_t n) {
-  size_t len = strnlen(s, n);
-  size_t read_size = len < n ? len + 1 : n;
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus sInOutEnclaveStatus;
-    uptr sPoisonedAddr;
-    RANGE_CHECK(s, read_size, sInOutEnclaveStatus, sPoisonedAddr, false);
-  }
-  return strndup(s, n);
-}
-
-size_t __sgxsan_strlcpy(char *dst, const char *src, size_t dsize) {
-  if (dsize != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus dstInOutEnclaveStatus;
-    uptr dstPoisonedAddr;
-    RANGE_CHECK(dst, dsize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  size_t result = strlcpy(dst, src, dsize);
-  if (LIKELY(asan_inited)) {
-    InOutEnclaveStatus srcInOutEnclaveStatus;
-    uptr srcPoisonedAddr;
-    RANGE_CHECK(src, result + 1, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-  }
-  return result;
-}
-
-void __sgxsan_bzero(void *s, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus sInOutEnclaveStatus;
-    uptr sPoisonedAddr;
-    RANGE_CHECK(s, n, sInOutEnclaveStatus, sPoisonedAddr, true);
-  }
-  bzero(s, n);
-}
-
-void __sgxsan_bcopy(const void *src, void *dst, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
-    uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, n, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, n, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  bcopy(src, dst, n);
-}
-
-void *__sgxsan_mempcpy(void *dst, const void *src, size_t n) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    if (dst != src) {
-      if (RangesOverlap((const char *)dst, n, (const char *)src, n)) {
-        GET_CALLER_PC_BP_SP;
-        sgxsan_error(true,
-                     "[%s] %p:%lu overlap with %p:%lu at pc %p (bp = 0x%lx sp "
-                     "= 0x%lx)\n",
-                     "mempcpy", dst, n, src, n, (void *)pc, bp, sp);
-      }
-    }
-    InOutEnclaveStatus srcInOutEnclaveStatus, dstInOutEnclaveStatus;
-    uptr srcPoisonedAddr, dstPoisonedAddr;
-    RANGE_CHECK(src, n, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-    RANGE_CHECK(dst, n, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  return mempcpy(dst, src, n);
-}
-
-//==============================================================================
-// 4. Safe String Functions (_s variants)
-//==============================================================================
-
-errno_t __sgxsan_strcpy_s(char *dst, size_t dstSize, const char *src) {
-  if (dstSize != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus dstInOutEnclaveStatus;
-    uptr dstPoisonedAddr;
-    RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  size_t src_len = strlen(src);
-  if (LIKELY(asan_inited)) {
-    InOutEnclaveStatus srcInOutEnclaveStatus;
-    uptr srcPoisonedAddr;
-    RANGE_CHECK(src, src_len + 1, srcInOutEnclaveStatus, srcPoisonedAddr,
-                false);
-  }
-  return strcpy_s(dst, dstSize, src);
-}
-
-errno_t __sgxsan_strncpy_s(char *dst, size_t dstSize, const char *src,
-                           size_t count) {
-  if (dstSize != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus dstInOutEnclaveStatus;
-    uptr dstPoisonedAddr;
-    RANGE_CHECK(dst, dstSize, dstInOutEnclaveStatus, dstPoisonedAddr, true);
-  }
-  if (count != 0 && LIKELY(asan_inited)) {
-    size_t src_len = strnlen(src, count);
-    size_t src_read = src_len < count ? src_len + 1 : count;
-    InOutEnclaveStatus srcInOutEnclaveStatus;
-    uptr srcPoisonedAddr;
-    RANGE_CHECK(src, src_read, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-  }
-  return strncpy_s(dst, dstSize, src, count);
-}
-
-errno_t __sgxsan_strcat_s(char *dst, size_t dstSize, const char *src) {
-  if (dstSize != 0 && LIKELY(asan_inited)) {
-    size_t dst_len = strlen(dst);
-    InOutEnclaveStatus dstReadInOutEnclaveStatus;
-    uptr dstReadPoisonedAddr;
-    RANGE_CHECK(dst, dst_len + 1, dstReadInOutEnclaveStatus,
-                dstReadPoisonedAddr, false);
-    InOutEnclaveStatus dstWriteInOutEnclaveStatus;
-    uptr dstWritePoisonedAddr;
-    RANGE_CHECK(dst, dstSize, dstWriteInOutEnclaveStatus, dstWritePoisonedAddr,
-                true);
-  }
-  size_t src_len = strlen(src);
-  if (LIKELY(asan_inited)) {
-    InOutEnclaveStatus srcInOutEnclaveStatus;
-    uptr srcPoisonedAddr;
-    RANGE_CHECK(src, src_len + 1, srcInOutEnclaveStatus, srcPoisonedAddr,
-                false);
-  }
-  return strcat_s(dst, dstSize, src);
-}
-
-errno_t __sgxsan_strncat_s(char *dst, size_t dstSize, const char *src,
-                           size_t count) {
-  if (dstSize != 0 && LIKELY(asan_inited)) {
-    size_t dst_len = strlen(dst);
-    InOutEnclaveStatus dstReadInOutEnclaveStatus;
-    uptr dstReadPoisonedAddr;
-    RANGE_CHECK(dst, dst_len + 1, dstReadInOutEnclaveStatus,
-                dstReadPoisonedAddr, false);
-    InOutEnclaveStatus dstWriteInOutEnclaveStatus;
-    uptr dstWritePoisonedAddr;
-    RANGE_CHECK(dst, dstSize, dstWriteInOutEnclaveStatus, dstWritePoisonedAddr,
-                true);
-  }
-  if (count != 0 && LIKELY(asan_inited)) {
-    size_t src_len = strnlen(src, count);
-    size_t src_read = src_len < count ? src_len + 1 : count;
-    InOutEnclaveStatus srcInOutEnclaveStatus;
-    uptr srcPoisonedAddr;
-    RANGE_CHECK(src, src_read, srcInOutEnclaveStatus, srcPoisonedAddr, false);
-  }
-  return strncat_s(dst, dstSize, src, count);
-}
-
-//==============================================================================
-// 5. Formatting Functions
-//==============================================================================
-
-int __sgxsan_snprintf(char *str, size_t n, const char *fmt, ...) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus strInOutEnclaveStatus;
-    uptr strPoisonedAddr;
-    RANGE_CHECK(str, n, strInOutEnclaveStatus, strPoisonedAddr, true);
-  }
-  va_list ap;
-  va_start(ap, fmt);
-  int ret = vsnprintf(str, n, fmt, ap);
-  va_end(ap);
-  return ret;
-}
-
-int __sgxsan_vsnprintf(char *str, size_t n, const char *fmt, va_list ap) {
-  if (n != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus strInOutEnclaveStatus;
-    uptr strPoisonedAddr;
-    RANGE_CHECK(str, n, strInOutEnclaveStatus, strPoisonedAddr, true);
-  }
-  return vsnprintf(str, n, fmt, ap);
-}
-
-int __sgxsan_sprintf_s(char *str, size_t sizeInBytes, const char *fmt, ...) {
-  if (sizeInBytes != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus strInOutEnclaveStatus;
-    uptr strPoisonedAddr;
-    RANGE_CHECK(str, sizeInBytes, strInOutEnclaveStatus, strPoisonedAddr, true);
-  }
-  va_list ap;
-  va_start(ap, fmt);
-  int ret = vsnprintf(str, sizeInBytes, fmt, ap);
-  va_end(ap);
-  return ret;
-}
-
-int __sgxsan__snprintf_s(char *str, size_t sizeInBytes, size_t count,
-                         const char *fmt, ...) {
-  if (sizeInBytes != 0 && LIKELY(asan_inited)) {
-    InOutEnclaveStatus strInOutEnclaveStatus;
-    uptr strPoisonedAddr;
-    RANGE_CHECK(str, sizeInBytes, strInOutEnclaveStatus, strPoisonedAddr, true);
-  }
-  va_list ap;
-  va_start(ap, fmt);
-  int ret = vsnprintf(str, std::min(sizeInBytes, count + 1), fmt, ap);
-  va_end(ap);
-  return ret;
-}
-
-//==============================================================================
-// 6. NUL-Terminated String Operations
-//==============================================================================
-
-size_t __sgxsan_strlen(const char *s) {
-  size_t result = strlen(s);
-  if (LIKELY(asan_inited)) {
-    InOutEnclaveStatus sInOutEnclaveStatus;
-    uptr sPoisonedAddr;
-    RANGE_CHECK(s, result + 1, sInOutEnclaveStatus, sPoisonedAddr, false);
-  }
-  return result;
-}
-
-int __sgxsan_strcmp(const char *s1, const char *s2) {
-  int result = strcmp(s1, s2);
-  if (LIKELY(asan_inited)) {
-    size_t len1 = strlen(s1);
-    size_t len2 = strlen(s2);
-    InOutEnclaveStatus s1InOutEnclaveStatus, s2InOutEnclaveStatus;
-    uptr s1PoisonedAddr, s2PoisonedAddr;
-    RANGE_CHECK(s1, len1 + 1, s1InOutEnclaveStatus, s1PoisonedAddr, false);
-    RANGE_CHECK(s2, len2 + 1, s2InOutEnclaveStatus, s2PoisonedAddr, false);
-  }
-  return result;
-}
-
-char *__sgxsan_strchr(const char *s, int c) {
-  char *result = (char *)strchr(s, c);
-  if (LIKELY(asan_inited)) {
-    size_t len = result ? (size_t)(result - s + 1) : strlen(s) + 1;
-    InOutEnclaveStatus sInOutEnclaveStatus;
-    uptr sPoisonedAddr;
-    RANGE_CHECK(s, len, sInOutEnclaveStatus, sPoisonedAddr, false);
-  }
-  return result;
-}
-
-char *__sgxsan_strrchr(const char *s, int c) {
-  char *result = (char *)strrchr(s, c);
-  if (LIKELY(asan_inited)) {
-    size_t len = strlen(s) + 1;
-    InOutEnclaveStatus sInOutEnclaveStatus;
-    uptr sPoisonedAddr;
-    RANGE_CHECK(s, len, sInOutEnclaveStatus, sPoisonedAddr, false);
-  }
-  return result;
-}
-
-char *__sgxsan_strstr(const char *s, const char *find) {
-  char *result = (char *)strstr(s, find);
-  if (LIKELY(asan_inited)) {
-    size_t slen = strlen(s) + 1;
-    size_t flen = strlen(find) + 1;
-    InOutEnclaveStatus sInOutEnclaveStatus, findInOutEnclaveStatus;
-    uptr sPoisonedAddr, findPoisonedAddr;
-    RANGE_CHECK(s, slen, sInOutEnclaveStatus, sPoisonedAddr, false);
-    RANGE_CHECK(find, flen, findInOutEnclaveStatus, findPoisonedAddr, false);
-  }
-  return result;
-}
-
-size_t __sgxsan_strspn(const char *s1, const char *s2) {
-  size_t result = strspn(s1, s2);
-  if (LIKELY(asan_inited)) {
-    size_t len1 = strlen(s1) + 1;
-    size_t len2 = strlen(s2) + 1;
-    InOutEnclaveStatus s1InOutEnclaveStatus, s2InOutEnclaveStatus;
-    uptr s1PoisonedAddr, s2PoisonedAddr;
-    RANGE_CHECK(s1, len1, s1InOutEnclaveStatus, s1PoisonedAddr, false);
-    RANGE_CHECK(s2, len2, s2InOutEnclaveStatus, s2PoisonedAddr, false);
-  }
-  return result;
-}
-
-size_t __sgxsan_strcspn(const char *s1, const char *s2) {
-  size_t result = strcspn(s1, s2);
-  if (LIKELY(asan_inited)) {
-    size_t len1 = strlen(s1) + 1;
-    size_t len2 = strlen(s2) + 1;
-    InOutEnclaveStatus s1InOutEnclaveStatus, s2InOutEnclaveStatus;
-    uptr s1PoisonedAddr, s2PoisonedAddr;
-    RANGE_CHECK(s1, len1, s1InOutEnclaveStatus, s1PoisonedAddr, false);
-    RANGE_CHECK(s2, len2, s2InOutEnclaveStatus, s2PoisonedAddr, false);
-  }
-  return result;
-}
-
-char *__sgxsan_strpbrk(const char *s1, const char *s2) {
-  char *result = (char *)strpbrk(s1, s2);
-  if (LIKELY(asan_inited)) {
-    size_t len1 = strlen(s1) + 1;
-    size_t len2 = strlen(s2) + 1;
-    InOutEnclaveStatus s1InOutEnclaveStatus, s2InOutEnclaveStatus;
-    uptr s1PoisonedAddr, s2PoisonedAddr;
-    RANGE_CHECK(s1, len1, s1InOutEnclaveStatus, s1PoisonedAddr, false);
-    RANGE_CHECK(s2, len2, s2InOutEnclaveStatus, s2PoisonedAddr, false);
-  }
-  return result;
-}
+  return getRegionStatus(addr, size) == OutEnclave ? 1 : 0;
 }

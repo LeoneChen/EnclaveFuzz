@@ -1,19 +1,26 @@
 #pragma once
 
+/// Malloc.h — SGXSan 堆分配器接口与辅助工具
+///
+/// 提供：
+///   - sgxsan_malloc/free/calloc/realloc：带影子内存红区的堆分配器
+///   - 红区大小计算工具（ComputeRZSize 等）
+///
+/// 分配布局：
+///   [左红区 | chunk 元数据 | 用户数据 | 右红区]
+///   chunk 元数据紧贴用户数据左侧，包含原始分配地址、大小等信息
+
 #include "Poison.h"
+#include "Quarantine.h"
 #include "SGXSanRTApp.h"
-#include <boost/stacktrace.hpp>
-#include <deque>
 #include <pthread.h>
 #include <stddef.h>
-#include <sys/resource.h>
-#include <unordered_map>
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
-void updateBackEndHeapAllocator();
-void ClearHeapObject();
+/// InitHeapAllocator：在 SGXSanInit 前懒初始化 gQCache
+void InitHeapAllocator();
 void *sgxsan_malloc(size_t size);
 void *sgxsan_malloc_raw(size_t size, uptr alignment);
 void sgxsan_free(void *ptr);
@@ -25,7 +32,8 @@ size_t sgxsan_malloc_usable_size(void *mem);
 }
 #endif
 
-// rz_log represent 2^(rz_log+4)
+// ── 红区大小计算 ──────────────────────────────────────────────────────────
+/// 红区大小 = 2^(rz_log + 4)，按用户申请大小分档（越大的对象，红区越大）
 static inline uptr ComputeRZLog(uptr user_requested_size) {
   uint32_t rz_log = user_requested_size <= 64 - 16            ? 0
                     : user_requested_size <= 128 - 32         ? 1
@@ -35,7 +43,6 @@ static inline uptr ComputeRZLog(uptr user_requested_size) {
                     : user_requested_size <= (1 << 15) - 512  ? 5
                     : user_requested_size <= (1 << 16) - 1024 ? 6
                                                               : 7;
-
   return rz_log;
 }
 
@@ -46,191 +53,14 @@ static inline uint32_t RZLog2Size(uint32_t rz_log) {
 
 static inline uptr ComputeRZSize(uptr size) { return 16 << ComputeRZLog(size); }
 
-void update_heap_usage(void *ptr, bool true_add_false_minus = true);
+/// update_heap_usage：在 DEBUG 日志级别下跟踪全局堆用量（统计用）
+void update_heap_usage(void *ptr, bool is_alloc = true);
 
-class SGXSanHeapBacktrace {
-public:
-  SGXSanHeapBacktrace() { pthread_rwlock_init(&mRWLock, nullptr); }
-
-  void StoreMallocBT(uptr user_beg) {
-    if (DFEnableCollectStack) {
-      pthread_rwlock_wrlock(&mRWLock);
-      auto &BT = mUserBeg2BT[user_beg];
-      BT.malloc_bt_cnt = boost::stacktrace::safe_dump_to(
-          BT.malloc_bt, sizeof(decltype(BT.malloc_bt)));
-      BT.free_bt_cnt = 0;
-      pthread_rwlock_unlock(&mRWLock);
-    }
-  }
-
-  void StoreFreeBT(uptr user_beg) {
-    if (DFEnableCollectStack) {
-      pthread_rwlock_wrlock(&mRWLock);
-      auto &BT = mUserBeg2BT[user_beg];
-      BT.free_bt_cnt = boost::stacktrace::safe_dump_to(
-          BT.free_bt, sizeof(decltype(BT.free_bt)));
-      pthread_rwlock_unlock(&mRWLock);
-    }
-  }
-
-  void RemoveBT(uptr user_beg) {
-    if (DFEnableCollectStack) {
-      pthread_rwlock_wrlock(&mRWLock);
-      mUserBeg2BT.erase(user_beg);
-      pthread_rwlock_unlock(&mRWLock);
-    }
-  }
-
-  MallocFreeBTTy GetHeapBacktrace(uptr user_beg) {
-    if (DFEnableCollectStack) {
-      pthread_rwlock_rdlock(&mRWLock);
-      auto bt = mUserBeg2BT[user_beg];
-      pthread_rwlock_unlock(&mRWLock);
-      return bt;
-    } else {
-      return MallocFreeBTTy();
-    }
-  }
-
-private:
-  std::unordered_map<uptr, MallocFreeBTTy> mUserBeg2BT;
-  pthread_rwlock_t mRWLock;
+/// chunk：嵌入左红区末尾的元数据，记录本次分配的原始信息
+struct chunk {
+  size_t magic;      // 校验魔数，确保查询到的 user_beg 合法
+  uptr alloc_beg;    // malloc 返回的原始地址
+  size_t alloc_size; // malloc_usable_size 获取的实际分配大小
+  size_t user_size;  // 用户请求的大小
+  MallocFreeBT *bt;  // malloc/free 调用栈（DFEnableCollectStack 时分配）
 };
-
-extern SGXSanHeapBacktrace *gHeapBT;
-
-struct QuarantineElement {
-  uptr alloc_beg;
-  uptr alloc_size;
-  uptr user_beg;
-  uptr user_size;
-};
-
-typedef std::deque<QuarantineElement> QuarantineQueueTy;
-
-#define SGXSAN_MAX_QUARANTINE_SIZE 0x10000000
-
-class QuarantineCache {
-public:
-  QuarantineCache() {
-    auto p = malloc(sizeof(QuarantineQueueTy));
-    sgxsan_assert(p != nullptr);
-    update_heap_usage(p);
-    m_queue = new (p) QuarantineQueueTy();
-    sgxsan_assert(m_queue != nullptr);
-    m_mutex = PTHREAD_MUTEX_INITIALIZER;
-    m_used_size = 0;
-    // Calculate suitable quarantine size
-    struct rlimit64 limit64;
-    sgxsan_assert(getrlimit64(RLIMIT_DATA, &limit64) == 0);
-    struct rlimit limit;
-    sgxsan_assert(getrlimit(RLIMIT_DATA, &limit) == 0);
-    m_max_size = std::min(std::min(limit64.rlim_cur, limit.rlim_cur) >> 4,
-                          (size_t)SGXSAN_MAX_QUARANTINE_SIZE);
-  }
-
-  ~QuarantineCache() {
-    sgxsan_assert(m_queue != nullptr);
-    // free memory recorded in Quarantine, not only the struct that record
-    // Quarantine
-    while (not empty())
-      freeOldestQuarantineElement();
-    // free struct that record Quarantine
-    m_queue->~deque();
-    update_heap_usage(m_queue, false);
-    free(m_queue);
-    m_queue = nullptr;
-    m_used_size = 0;
-    m_max_size = 0;
-  }
-
-  QuarantineElement find(uptr addr) {
-    pthread_mutex_lock(&m_mutex);
-    auto it = std::find_if(
-        m_queue->begin(), m_queue->end(), [addr](QuarantineElement qe) {
-          return qe.user_beg <= addr and
-                 addr < qe.user_beg + qe.user_size + (1 << SHADOW_SCALE);
-        });
-    QuarantineElement ret;
-    ret.alloc_beg = -1;
-    if (it != m_queue->end()) {
-      ret = *it;
-    }
-    pthread_mutex_unlock(&m_mutex);
-    return ret;
-  }
-
-  void show();
-
-  void put(QuarantineElement qe) {
-    pthread_mutex_lock(&m_mutex);
-    if (m_queue == nullptr) {
-      freeDirectly(qe);
-      goto out;
-    }
-
-    if (m_queue->empty()) {
-      sgxsan_assert(m_used_size == 0);
-    }
-
-    // if cache can not hold this element, directly free it
-    if (qe.alloc_size > m_max_size) {
-      freeDirectly(qe);
-    } else {
-      // pop queue util it can hold new element
-      while (UNLIKELY((!m_queue->empty()) &&
-                      (m_used_size + qe.alloc_size > m_max_size))) {
-        freeOldestQuarantineElement();
-        if (m_queue->empty()) {
-          sgxsan_assert(m_used_size == 0);
-        }
-      }
-      log_trace("[Put to Quaratine] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n",
-                qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size,
-                qe.alloc_beg + qe.alloc_size);
-      gHeapBT->StoreFreeBT(qe.user_beg);
-      m_queue->push_back(qe);
-      m_used_size += qe.alloc_size;
-    }
-  out:
-    pthread_mutex_unlock(&m_mutex);
-  }
-
-private:
-  void freeQuarantineElement(QuarantineElement qe) {
-    update_heap_usage((void *)qe.alloc_beg, false);
-    gHeapBT->RemoveBT(qe.user_beg);
-    free(reinterpret_cast<void *>(qe.alloc_beg));
-    log_trace("[Free QuarantineElement] [0x%lx..0x%lx ~ 0x%lx..0x%lx) \n",
-              qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size,
-              qe.alloc_beg + qe.alloc_size);
-    PoisonShadow(qe.alloc_beg, qe.alloc_size, kAsanNotPoisonedMagic, true);
-    // update quarantine cache
-    sgxsan_assert(m_used_size >= qe.alloc_size);
-    m_used_size -= qe.alloc_size;
-  }
-  void freeDirectly(QuarantineElement qe) {
-    update_heap_usage((void *)qe.alloc_beg, false);
-    gHeapBT->RemoveBT(qe.user_beg);
-    free((void *)qe.alloc_beg);
-    log_trace("[Direct Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg,
-              qe.user_beg, qe.user_beg + qe.user_size,
-              qe.alloc_beg + qe.alloc_size);
-    FastPoisonShadow(qe.user_beg, RoundUpTo(qe.user_size, SHADOW_GRANULARITY),
-                     kAsanNotPoisonedMagic, true);
-  }
-  void freeOldestQuarantineElement() {
-    QuarantineElement front_qe = m_queue->front();
-    // free and poison
-    freeQuarantineElement(front_qe);
-    m_queue->pop_front();
-  }
-  bool empty() { return m_queue->empty(); }
-
-  QuarantineQueueTy *m_queue;
-  size_t m_used_size;
-  size_t m_max_size;
-  pthread_mutex_t m_mutex;
-};
-
-extern QuarantineCache *gQCache;

@@ -1,3 +1,9 @@
+/// Poison.cpp — 影子内存毒化实现
+///
+/// 实现两类 API：
+///   1. ASan 插桩回调（__asan_set_shadow_*、__asan_alloca_*、全局变量注册等）
+///   2. SGXSan 内部毒化函数（FastPoisonShadow、PoisonShadow）
+
 #include "Poison.h"
 #include "SGXSanRTApp.h"
 #include <algorithm>
@@ -5,9 +11,10 @@
 #include <string.h>
 #include <vector>
 
-/// Callback for SGXSan Pass
-/// Used by static allocas
-/// Already applied InEnclave flag in PASS before call these
+/// ── ASan 静态插桩回调 ───────────────────────────────────────────────────
+///
+/// __asan_set_shadow_XX 由 ASan Pass 在编译期插入，用于对静态 alloca 写影子。
+/// Enclave Pass 已在调用前设置好 InEnclave 标志，故此处只写 L1 位。
 #define ASAN_SET_SHADOW(shadowValue)                                           \
   extern "C" void __asan_set_shadow_##shadowValue(uptr addr, uptr size) {      \
     memset((void *)addr, L1F(0x##shadowValue), size);                          \
@@ -21,48 +28,55 @@ ASAN_SET_SHADOW(f5)
 ASAN_SET_SHADOW(f8)
 ASAN_SET_SHADOW(fe)
 
-/// Used by dynamic allocas
+/// 动态 alloca 的毒化/取消毒化回调
 extern "C" void __asan_poison_stack_memory(uptr addr, uptr size) {
   PoisonShadow(addr, size, kAsanStackUseAfterScopeMagic);
 }
 
+/// skipInEnclaveTag=true：还原栈影子内存时不叠加 InEnclave 位
 extern "C" void __asan_unpoison_stack_memory(uptr addr, uptr size) {
   PoisonShadow(addr, size, kAsanNotPoisonedMagic, true);
 }
 
-static const uint64_t kAllocaRedzoneSize = 32UL;
+/// alloca 红区大小固定为 32 字节
+static constexpr uptr kAllocaRedzoneSize = 32;
 
+/// 对 VLA（动态栈数组）两侧红区进行毒化
+/// 布局：[LeftRedzone | 用户数据 | PartialRz | RightRedzone]
 extern "C" void __asan_alloca_poison(uptr addr, uptr size) {
-  /// LeftRedzoneAddr < addr < PartialRzAligned <= PartialRzAddr <= RightRzAddr
-  uptr LeftRedzoneAddr = addr - kAllocaRedzoneSize;
-  uptr PartialRzAddr = addr + size;
-  uptr RightRzAddr = RoundUpTo(PartialRzAddr, kAllocaRedzoneSize);
-  uptr PartialRzAligned = RoundDownTo(PartialRzAddr, SHADOW_GRANULARITY);
+  uptr left_rz_addr = addr - kAllocaRedzoneSize;
+  uptr partial_rz_addr = addr + size;
+  uptr right_rz_addr = RoundUpTo(partial_rz_addr, kAllocaRedzoneSize);
+  uptr partial_rz_aligned = RoundDownTo(partial_rz_addr, SHADOW_GRANULARITY);
 
-  FastPoisonShadow(LeftRedzoneAddr, kAllocaRedzoneSize, kAsanAllocaLeftMagic);
-  FastPoisonShadow(addr, PartialRzAligned - addr, kAsanNotPoisonedMagic);
+  FastPoisonShadow(left_rz_addr, kAllocaRedzoneSize, kAsanAllocaLeftMagic);
+  FastPoisonShadow(addr, partial_rz_aligned - addr, kAsanNotPoisonedMagic);
   FastPoisonShadowPartialRightRedzone(
-      PartialRzAligned, PartialRzAddr % SHADOW_GRANULARITY,
-      RightRzAddr - PartialRzAligned, kAsanAllocaRightMagic);
-  FastPoisonShadow(RightRzAddr, kAllocaRedzoneSize, kAsanAllocaRightMagic);
+      partial_rz_aligned, partial_rz_addr % SHADOW_GRANULARITY,
+      right_rz_addr - partial_rz_aligned, kAsanAllocaRightMagic);
+  FastPoisonShadow(right_rz_addr, kAllocaRedzoneSize, kAsanAllocaRightMagic);
 }
 
+/// 清除 [top, bottom) 范围内所有 VLA 的影子毒化（函数返回时批量还原）
 extern "C" void __asan_allocas_unpoison(uptr top, uptr bottom) {
-  if ((!top) || (top > bottom))
+  if (!top || top > bottom)
     return;
   memset((void *)MemToShadow(top), kAsanNotPoisonedMagic,
          (bottom - top) / SHADOW_GRANULARITY);
 }
 
-/// Level 1 API
+/// ── L1 层毒化实现 ───────────────────────────────────────────────────────
+
+/// 批量写入对齐影子内存
+/// skipInEnclaveTag=true：直接写入 value，不叠加 L0 InEnclave 标志位
 void FastPoisonShadow(uptr aligned_addr, uptr aligned_size, uint8_t value,
-                      bool returnBackToNormal) {
+                      bool skipInEnclaveTag) {
   memset((void *)MEM_TO_SHADOW(aligned_addr),
-         returnBackToNormal ? value : L0P(value),
+         skipInEnclaveTag ? value : L0P(value),
          aligned_size / SHADOW_GRANULARITY);
 }
 
-/// Poison valid memory with right redzone
+/// 处理内存块右侧部分未对齐的影子粒度（right partial redzone）
 void FastPoisonShadowPartialRightRedzone(uptr aligned_addr, uptr size,
                                          uptr aligned_size_with_rz,
                                          uint8_t rz_value) {
@@ -75,10 +89,11 @@ void FastPoisonShadowPartialRightRedzone(uptr aligned_addr, uptr size,
   }
 }
 
-void PoisonShadow(uptr addr, uptr size, uint8_t value,
-                  bool returnBackToNormal) {
-  // If addr do not aligned at granularity, start posioning from
-  // RoundUpTo(addr, granularity)
+/// 对任意起始地址 / 任意大小的内存区域写影子
+/// 若 addr 未对齐，先跳过前缀不足一个粒度的部分，再批量处理中间对齐段，
+/// 最后单独处理末尾不足一个粒度的残余字节
+void PoisonShadow(uptr addr, uptr size, uint8_t value, bool skipInEnclaveTag) {
+  // 若起始地址未对齐，从下一个对齐边界开始
   if (UNLIKELY(!IsAligned(addr, SHADOW_GRANULARITY))) {
     uptr aligned_addr = RoundUpTo(addr, SHADOW_GRANULARITY);
     if (size <= aligned_addr - addr) {
@@ -88,55 +103,61 @@ void PoisonShadow(uptr addr, uptr size, uint8_t value,
     addr = aligned_addr;
   }
 
+  // 处理末尾残余字节（不足一个 SHADOW_GRANULARITY 的部分）
   uint8_t remained = size & (SHADOW_GRANULARITY - 1);
-  FastPoisonShadow(addr, size - remained, value, returnBackToNormal);
+  FastPoisonShadow(addr, size - remained, value, skipInEnclaveTag);
 
   if (remained) {
     uint8_t *shadowEnd = (uint8_t *)MEM_TO_SHADOW(addr + size - remained);
     int8_t origValue = L1F(*shadowEnd);
     if (value >= 0x80) {
+      // 红区/释放魔数：仅当残余字节覆盖范围内有有效字节时才写入
       if (0 < origValue && origValue <= (int8_t)remained)
         *shadowEnd = L0P(value);
     } else if (value == kAsanNotPoisonedMagic) {
+      // 取消毒化：保留原有可访问边界（取最大值），确保部分可访问状态正确
       uint8_t poisonVal = std::max(origValue, (int8_t)remained);
-      *shadowEnd = returnBackToNormal ? poisonVal : L0P(poisonVal);
+      *shadowEnd = skipInEnclaveTag ? poisonVal : L0P(poisonVal);
     } else {
-      abort();
+      sgxsan_error(
+          true, "PoisonShadow: unexpected value 0x%02x for partial granule\n",
+          value);
     }
   }
 }
 
-// This structure is used to describe the source location of a place where
-// global was defined.
+/// ── 全局变量毒化（__asan_register/unregister_globals）───────────────────
+
+// ASan 全局变量源码位置描述符
 struct __asan_global_source_location {
   const char *filename;
   int line_no;
   int column_no;
 };
 
-// This structure describes an instrumented global variable.
-struct SGXSanGlobal {
-  uptr beg;                // The address of the global.
-  uptr size;               // The original size of the global.
-  uptr size_with_redzone;  // The size with the redzone.
-  const char *name;        // Name as a C string.
-  const char *module_name; // Module name as a C string. This pointer is a
-                           // unique identifier of a module.
-  uptr has_dynamic_init;   // Non-zero if the global has dynamic initializer.
-  __asan_global_source_location *location; // Source location of a global,
-                                           // or NULL if it is unknown.
-  uptr odr_indicator; // The address of the ODR indicator symbol.
+// ASan 插桩的全局变量描述符
+struct __asan_global {
+  uptr beg;                                // 全局变量起始地址
+  uptr size;                               // 原始大小
+  uptr size_with_redzone;                  // 含右红区的总大小
+  const char *name;                        // 变量名（C 字符串）
+  const char *module_name;                 // 所属模块名（作为模块唯一标识）
+  uptr has_dynamic_init;                   // 非零表示有动态初始化器
+  __asan_global_source_location *location; // 源码位置，未知则为 NULL
+  uptr odr_indicator;                      // ODR 指示符地址
 };
 
+// 带初始化状态的动态全局变量包装
 struct DynInitGlobal {
-  SGXSanGlobal g;
+  __asan_global g;
   bool initialized;
 };
 
 static pthread_mutex_t mu_for_globals = PTHREAD_MUTEX_INITIALIZER;
 static std::vector<DynInitGlobal> dynamic_init_globals;
 
-static void PoisonRedZones(const SGXSanGlobal &g) {
+/// 对全局变量的右红区写毒化标记
+static void PoisonRedZones(const __asan_global &g) {
   uptr aligned_size = RoundUpTo(g.size, SHADOW_GRANULARITY);
   FastPoisonShadow(g.beg + aligned_size, g.size_with_redzone - aligned_size,
                    kAsanGlobalRedzoneMagic);
@@ -148,14 +169,14 @@ static void PoisonRedZones(const SGXSanGlobal &g) {
   }
 }
 
-static void PoisonShadowForGlobal(const SGXSanGlobal *g, uint8_t value) {
+/// 对整个全局变量（含红区）写指定毒化值
+static void PoisonShadowForGlobal(const __asan_global *g, uint8_t value) {
   FastPoisonShadow(g->beg, g->size_with_redzone, value);
 }
 
-// Register a global variable.
-// This function may be called more than once for every global
-// so we store the globals in a map.
-static void RegisterGlobal(const SGXSanGlobal *g) {
+/// 注册单个全局变量：将用户区域标记为可访问，红区标记为毒化
+/// 同一全局变量可能被多次注册（如模板实例化），需幂等处理
+static void RegisterGlobal(const __asan_global *g) {
   sgxsan_assert(asan_inited and AddrIsInMem(g->beg));
   sgxsan_error(!IsAligned(g->beg, SHADOW_GRANULARITY),
                "The following global variable is not properly aligned.\n"
@@ -177,20 +198,20 @@ static void RegisterGlobal(const SGXSanGlobal *g) {
   }
 }
 
-// Register an array of globals.
-extern "C" void __asan_register_globals(SGXSanGlobal *globals, uptr n) {
+/// 批量注册全局变量数组（由编译器生成的 __asan_register_globals 调用）
+extern "C" void __asan_register_globals(__asan_global *globals, uptr n) {
   pthread_mutex_lock(&mu_for_globals);
   for (uptr i = 0; i < n; i++) {
     RegisterGlobal(&globals[i]);
   }
-
-  // Poison the metadata. It should not be accessible to user code.
-  PoisonShadow((uptr)globals, n * sizeof(SGXSanGlobal),
+  // 对描述符元数据本身也毒化，防止用户代码意外访问
+  PoisonShadow((uptr)globals, n * sizeof(__asan_global),
                kAsanGlobalRedzoneMagic);
   pthread_mutex_unlock(&mu_for_globals);
 }
 
-static void UnregisterGlobal(const SGXSanGlobal *g) {
+/// 注销单个全局变量：skipInEnclaveTag=true，直接还原为 0，不带 InEnclave 位
+static void UnregisterGlobal(const __asan_global *g) {
   sgxsan_assert(asan_inited and AddrIsInMem(g->beg) and
                 IsAligned(g->beg, SHADOW_GRANULARITY) and
                 IsAligned(g->size_with_redzone, SHADOW_GRANULARITY));
@@ -198,15 +219,13 @@ static void UnregisterGlobal(const SGXSanGlobal *g) {
   FastPoisonShadow(g->beg, g->size_with_redzone, kAsanNotPoisonedMagic, true);
 }
 
-// Unregister an array of globals.
-// We must do this when a shared objects gets dlclosed.
-extern "C" void __asan_unregister_globals(SGXSanGlobal *globals, uptr n) {
+/// 批量注销全局变量（DSO 被 dlclose 时调用）
+extern "C" void __asan_unregister_globals(__asan_global *globals, uptr n) {
   pthread_mutex_lock(&mu_for_globals);
   for (uptr i = 0; i < n; i++) {
     UnregisterGlobal(&globals[i]);
   }
-
-  // Remove corresponding dynamic-init entries.
+  // 同步删除对应的动态初始化条目
   dynamic_init_globals.erase(std::remove_if(dynamic_init_globals.begin(),
                                             dynamic_init_globals.end(),
                                             [&](const DynInitGlobal &dg) {
@@ -216,13 +235,14 @@ extern "C" void __asan_unregister_globals(SGXSanGlobal *globals, uptr n) {
                                               return false;
                                             }),
                              dynamic_init_globals.end());
-
-  // Unpoison the metadata.
-  PoisonShadow((uptr)globals, n * sizeof(SGXSanGlobal), kAsanNotPoisonedMagic,
+  // 还原描述符元数据的影子内存
+  PoisonShadow((uptr)globals, n * sizeof(__asan_global), kAsanNotPoisonedMagic,
                true);
   pthread_mutex_unlock(&mu_for_globals);
 }
 
+/// 动态初始化开始前：对其他模块的全局变量写初始化顺序毒化，
+/// 防止当前模块提前访问尚未初始化的跨模块全局变量
 extern "C" void __asan_before_dynamic_init(const char *module_name) {
   if (!asan_inited || dynamic_init_globals.empty())
     return;
@@ -230,6 +250,8 @@ extern "C" void __asan_before_dynamic_init(const char *module_name) {
   for (auto &dyn_g : dynamic_init_globals) {
     if (dyn_g.initialized)
       continue;
+    // ASan 用指针相等（而非 strcmp）判断模块名：同一编译单元的字符串字面量
+    // 地址相同，跨编译单元则不同，与 ASan 上游行为一致
     if (dyn_g.g.module_name != module_name)
       PoisonShadowForGlobal(&dyn_g.g, kAsanInitializationOrderMagic);
     else
@@ -238,6 +260,7 @@ extern "C" void __asan_before_dynamic_init(const char *module_name) {
   pthread_mutex_unlock(&mu_for_globals);
 }
 
+/// std::vector 等容器的容量注解回调（标记 [old_mid, new_mid) 的可访问性变化）
 extern "C" void
 __sanitizer_annotate_contiguous_container(const void *beg_p, const void *end_p,
                                           const void *old_mid_p,
@@ -246,20 +269,19 @@ __sanitizer_annotate_contiguous_container(const void *beg_p, const void *end_p,
   uptr end = reinterpret_cast<uptr>(end_p);
   uptr old_mid = reinterpret_cast<uptr>(old_mid_p);
   uptr new_mid = reinterpret_cast<uptr>(new_mid_p);
-  uptr granularity = SHADOW_GRANULARITY;
 
   sgxsan_error(!(beg <= old_mid && beg <= new_mid && old_mid <= end &&
-                 new_mid <= end && IsAligned(beg, granularity)),
+                 new_mid <= end && IsAligned(beg, SHADOW_GRANULARITY)),
                "__sanitizer_annotate_contiguous_container: Invalid parameters\n"
                "beg=%p, end=%p, old_mid=%p, new_mid=%p\n",
                beg_p, end_p, old_mid_p, new_mid_p);
 
-  uptr a = RoundDownTo(std::min(old_mid, new_mid), granularity);
-  uptr c = RoundUpTo(std::max(old_mid, new_mid), granularity);
-  uptr b1 = RoundDownTo(new_mid, granularity);
-  uptr b2 = RoundUpTo(new_mid, granularity);
+  uptr a = RoundDownTo(std::min(old_mid, new_mid), SHADOW_GRANULARITY);
+  uptr c = RoundUpTo(std::max(old_mid, new_mid), SHADOW_GRANULARITY);
+  uptr b1 = RoundDownTo(new_mid, SHADOW_GRANULARITY);
+  uptr b2 = RoundUpTo(new_mid, SHADOW_GRANULARITY);
 
-  PoisonShadow(a, b1 - a, 0);
+  PoisonShadow(a, b1 - a, kAsanNotPoisonedMagic);
   PoisonShadow(b2, c - b2, kAsanContiguousContainerOOBMagic);
 
   if (b1 != b2) {
@@ -268,6 +290,7 @@ __sanitizer_annotate_contiguous_container(const void *beg_p, const void *end_p,
   }
 }
 
+/// 动态初始化完成后：将未完成初始化的全局变量影子还原为正常可访问状态
 extern "C" void __asan_after_dynamic_init() {
   if (!asan_inited || dynamic_init_globals.empty())
     return;
