@@ -41,16 +41,13 @@ static void PrintShadowMap(log_level level, uptr addr) {
     snprintf(buf, BUFSIZ, "%s%p:", i == shadowRow ? "=>" : "  ", (void *)i);
     output += buf;
     for (int j = 0; j < 16; j++) {
-      // 用 "[" "]" 高亮目标列；若目标列在末尾则 "]" 附在列值后
-      char pre = (i == shadowRow && j == shadowCol) ? '[' : ' ';
-      char post = (i == shadowRow && shadowCol < 15 && j == shadowCol + 1) ? ']'
-                  : (i == shadowRow && shadowCol == 15 && j == shadowCol)
-                      ? ']'
-                      : '\0';
-      if (post)
-        snprintf(buf, BUFSIZ, "%c%02x%c", pre, *(uint8_t *)(i + j), post);
+      uint8_t val = *(uint8_t *)(i + j);
+      if (i == shadowRow && j == shadowCol)
+        snprintf(buf, BUFSIZ, "[%02x]", val);
+      else if (i == shadowRow && shadowCol < 15 && j == shadowCol + 1)
+        snprintf(buf, BUFSIZ, "%02x", val); // ']' 已占用了前置空格
       else
-        snprintf(buf, BUFSIZ, "%c%02x", pre, *(uint8_t *)(i + j));
+        snprintf(buf, BUFSIZ, " %02x", val);
       output += buf;
     }
     output += " \n";
@@ -96,9 +93,9 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
   sgxsan_log(LOG_LEVEL_ERROR, false, "%s", buf);
 
   sgxsan_log(LOG_LEVEL_ERROR, false,
-             " at pc %p %s %p with 0x%lx bytes (bp = %p sp = %p)\n\n",
-             (void *)pc, is_write ? "write" : "read", (void *)addr, access_size,
-             (void *)bp, (void *)sp);
+             " at pc %p: %s of size 0x%lx at %p (bp=%p sp=%p)\n\n", (void *)pc,
+             is_write ? "write" : "read", access_size, (void *)addr, (void *)bp,
+             (void *)sp);
   sgxsan_backtrace(LOG_LEVEL_ERROR);
   if (AddrIsInMem(addr))
     PrintShadowMap(LOG_LEVEL_ERROR, addr);

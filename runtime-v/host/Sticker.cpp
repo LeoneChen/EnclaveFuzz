@@ -21,6 +21,7 @@
 #include "sgx_urts.h"
 #include "trts_internal.h"
 #include <algorithm>
+#include <dlfcn.h>
 #include <errno.h>
 #include <filesystem>
 #include <link.h>
@@ -182,6 +183,49 @@ errno_t memset_s(void *s, size_t smax, int c, size_t n) {
   return 0;
 }
 
+errno_t strcpy_s(char *dst, size_t dstSize, const char *src) {
+  if (!dstSize)
+    return -1;
+  strncpy(dst, src, dstSize - 1);
+  dst[dstSize - 1] = '\0';
+  return 0;
+}
+
+errno_t strncpy_s(char *dst, size_t dstSize, const char *src, size_t count) {
+  if (!dstSize)
+    return -1;
+  size_t n = std::min(dstSize - 1, count);
+  strncpy(dst, src, n);
+  dst[n] = '\0';
+  return 0;
+}
+
+errno_t strcat_s(char *dst, size_t dstSize, const char *src) {
+  size_t dlen = strlen(dst);
+  if (dlen >= dstSize)
+    return -1;
+  strncat(dst, src, dstSize - dlen - 1);
+  return 0;
+}
+
+errno_t strncat_s(char *dst, size_t dstSize, const char *src, size_t count) {
+  size_t dlen = strlen(dst);
+  if (dlen >= dstSize)
+    return -1;
+  strncat(dst, src, std::min(dstSize - dlen - 1, count));
+  return 0;
+}
+
+size_t strlcpy(char *dst, const char *src, size_t dsize) {
+  size_t slen = strlen(src);
+  if (dsize) {
+    size_t n = std::min(slen, dsize - 1);
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+  }
+  return slen;
+}
+
 /// Enclave 堆/保留内存初始化桩（模拟模式下由 glibc 堆接管，直接返回成功）
 int heap_init(void *_heap_base, size_t _heap_size, size_t _heap_min_size,
               int _is_edmm_supported) {
@@ -241,7 +285,6 @@ sgx_status_t __sgx_create_enclave_ex(const char *file_name, const int debug,
                                      const void *ex_features_p[32]) {
   std::string file_abs_path = fs::absolute(fs::path(file_name));
   sgxsan_assert(fs::exists(file_abs_path));
-  gEnclaveInfo.SetEnclaveFileName(file_abs_path);
   if (GetOCallTableAddr) {
     g_enclave_ocall_table = (sgx_ocall_table_t *)GetOCallTableAddr();
   }
@@ -372,14 +415,11 @@ sgx_status_t sgx_tprotect_rsrv_mem(void *addr, size_t len, int prot) {
 /// 对 Enclave DSO 的所有可加载段写影子内存（标记为可访问）
 /// 在 dlopen 加载完成后、Enclave 初始化前调用，确保 Enclave 代码段
 /// 在影子内存中有正确的 NotPoisoned + InEnclave 标记
-void EnclaveInfo::PoisonEnclaveDSOCode() {
-  // Enclave 正在 dlopen 中，已完成 mmap，先获取其起始地址
-  sgxsan_assert(m_filename != "");
-  auto handler =
-      (struct link_map *)dlopen(m_filename.c_str(), RTLD_LAZY | RTLD_NOLOAD);
-  sgxsan_assert(handler);
-  m_start_addr = handler->l_addr;
-  sgxsan_assert(dlclose(handler) == 0);
+/// anchor：Enclave SO 内的任意符号地址，用于 dladdr 定位 DSO 加载基址
+void EnclaveInfo::PoisonEnclaveDSOCode(void *anchor) {
+  Dl_info info;
+  sgxsan_assert(dladdr(anchor, &info));
+  m_start_addr = (uptr)info.dli_fbase;
   m_dso_ranges.clear();
   dl_iterate_phdr(dlItCBGetEnclaveDSO, &m_start_addr);
 

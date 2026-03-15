@@ -3,7 +3,6 @@
 /// Sticker.h — Enclave 模拟层（EnclaveInfo）接口
 ///
 /// EnclaveInfo 维护当前加载的 Enclave 的元信息：
-///   - 文件路径（绝对路径）
 ///   - dlopen 返回的 link_map handler
 ///   - 各 PT_LOAD 段的地址范围（用于判断代码指针是否来自 Enclave、sancov PC
 ///   归一化等）
@@ -41,9 +40,6 @@ int dlItCBGetEnclaveDSO(struct dl_phdr_info *info, size_t size, void *data);
 
 class EnclaveInfo {
 public:
-  std::string GetEnclaveFileName() { return m_filename; }
-  void SetEnclaveFileName(std::string fileName) { m_filename = fileName; }
-
   void SetHandler(struct link_map *handler) { m_handler = handler; }
   struct link_map *GetHandler() { return m_handler; }
 
@@ -60,7 +56,6 @@ public:
 
   /// 清除所有 Enclave 元信息（Enclave 销毁时调用）
   void Clear() {
-    m_filename = "";
     m_start_addr = 0;
     m_dso_ranges.clear();
     m_handler = nullptr;
@@ -105,10 +100,10 @@ public:
   }
 
   /// 将 Enclave 代码段在影子内存中标记为 NotPoisoned + InEnclave
-  void PoisonEnclaveDSOCode();
+  /// anchor：Enclave SO 内的任意符号地址，用于 dladdr 定位 DSO 加载基址
+  void PoisonEnclaveDSOCode(void *anchor);
 
 private:
-  std::string m_filename = "";
   uptr m_start_addr;
   /// PT_LOAD 段地址范围：segment_start → segment_end
   AddrRangeMap m_dso_ranges;

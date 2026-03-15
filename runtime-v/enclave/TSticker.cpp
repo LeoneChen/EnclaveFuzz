@@ -45,6 +45,10 @@ extern "C" sgx_status_t tsticker_ecall(const sgx_enclave_id_t eid,
   return ((ecall_func_t)g_ecall_table.ecall_table[index].ecall_addr)(ms);
 }
 
+/// sgxsan_enclave_anchor — 锚函数，用于 dladdr 定位本 DSO 的加载基址
+/// PoisonEnclaveDSOCode 通过 dladdr(anchor) 拿到 dli_fbase，无需文件路径
+extern "C" void sgxsan_enclave_anchor() {}
+
 /// __asan_init — ASan 初始化钩子（必须在 SanitizerCoverage 构造函数之前执行）
 /// 在此注册信号处理器并对 Enclave DSO 代码段写影子内存标记。
 /// gAlreadyAsanInited 驻留在 Enclave 镜像中，每次 dlopen 加载后重置为 false。
@@ -52,7 +56,7 @@ extern "C" void __asan_init() {
   static bool gAlreadyAsanInited = false;
   if (!gAlreadyAsanInited) {
     register_sgxsan_sigaction();
-    gEnclaveInfo.PoisonEnclaveDSOCode();
+    gEnclaveInfo.PoisonEnclaveDSOCode((void *)sgxsan_enclave_anchor);
     gAlreadyAsanInited = true;
   }
 }
