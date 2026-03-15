@@ -60,6 +60,7 @@ public:
   static void init();
   static void destory();
   static void put(QuarantineElement qe);
+  static QuarantineElement find(uptr addr);
 
 private:
   static void freeQuarantineElement(QuarantineElement qe);

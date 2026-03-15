@@ -1,10 +1,13 @@
 
 #include "Malloc.hpp"
 #include "ErrorReport.hpp"
+#include "InternalDlmalloc.hpp"
 #include "Poison.hpp"
 #include "Quarantine.hpp"
 #include "SGXSanRTEnclave.hpp"
 #include <pthread.h>
+
+extern size_t libunwind_backtrace(uint64_t *ret_addrs, size_t max_count);
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
@@ -12,11 +15,21 @@ size_t global_heap_usage = 0;
 /* The maximum possible size_t value has all bits set */
 #define MAX_SIZE_T (~(size_t)0)
 
+static constexpr size_t kMaxBTFrames = 50;
+
+struct HeapBT {
+  uint64_t malloc_bt[kMaxBTFrames];
+  size_t malloc_bt_cnt;
+  uint64_t free_bt[kMaxBTFrames];
+  size_t free_bt_cnt;
+};
+
 struct chunk {
   size_t magic; // ensure queried user_beg is correct
   uptr alloc_beg;
   uptr alloc_size;
   size_t user_size;
+  HeapBT *bt; // separately allocated via dlmalloc; freed by FreeHeapChunkBT
 };
 
 void update_heap_usage(void *ptr, size_t (*malloc_usable_size_func)(void *),
@@ -93,6 +106,11 @@ void *MALLOC(size_t size) {
   m->alloc_beg = alloc_beg;
   m->alloc_size = allocated_size;
   m->user_size = size;
+  m->bt = static_cast<HeapBT *>(dlmalloc(sizeof(HeapBT)));
+  if (m->bt) {
+    m->bt->malloc_bt_cnt = libunwind_backtrace(m->bt->malloc_bt, kMaxBTFrames);
+    m->bt->free_bt_cnt = 0;
+  }
   log_trace("\n");
   log_trace("[Malloc] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", alloc_beg, user_beg,
             user_end, alloc_end);
@@ -143,6 +161,8 @@ void FREE(void *ptr) {
         .alloc_size = m->alloc_size,
         .user_beg = user_beg,
         .user_size = m->user_size};
+  if (m->bt)
+    m->bt->free_bt_cnt = libunwind_backtrace(m->bt->free_bt, kMaxBTFrames);
   QuarantineCache::put(qe);
   return;
 
@@ -217,4 +237,24 @@ size_t tc_malloc_size(void *ptr) {
   (void)ptr;
   sgxsan_error(true, "Unsupported tc_malloc_size\n");
   return 0;
+}
+
+bool GetHeapChunkBT(uptr user_beg, uint64_t **malloc_bt, size_t *malloc_cnt,
+                    uint64_t **free_bt, size_t *free_cnt) {
+  auto *m = reinterpret_cast<chunk *>(user_beg - sizeof(chunk));
+  if (m->magic != 0xDEADBEEF || !m->bt)
+    return false;
+  *malloc_bt = m->bt->malloc_bt;
+  *malloc_cnt = m->bt->malloc_bt_cnt;
+  *free_bt = m->bt->free_bt;
+  *free_cnt = m->bt->free_bt_cnt;
+  return true;
+}
+
+void FreeHeapChunkBT(uptr user_beg) {
+  auto *m = reinterpret_cast<chunk *>(user_beg - sizeof(chunk));
+  if (m->magic != 0xDEADBEEF)
+    return;
+  dlfree(m->bt);
+  m->bt = nullptr;
 }

@@ -75,6 +75,7 @@ out:
 
 void QuarantineCache::freeQuarantineElement(QuarantineElement qe) {
   update_heap_usage((void *)qe.alloc_beg, BACKEND_MALLOC_USABLE_SZIE, false);
+  FreeHeapChunkBT(qe.user_beg);
   BACKEND_FREE(reinterpret_cast<void *>(qe.alloc_beg));
   log_trace("[Quarantine->Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx) \n", qe.alloc_beg,
             qe.user_beg, qe.user_beg + qe.user_size,
@@ -88,6 +89,7 @@ void QuarantineCache::freeQuarantineElement(QuarantineElement qe) {
 
 void QuarantineCache::freeDirectly(QuarantineElement qe) {
   update_heap_usage((void *)qe.alloc_beg, BACKEND_MALLOC_USABLE_SZIE, false);
+  FreeHeapChunkBT(qe.user_beg);
   BACKEND_FREE(reinterpret_cast<void *>(qe.alloc_beg));
   log_trace("[Recycle->Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg,
             qe.user_beg, qe.user_beg + qe.user_size,
@@ -111,4 +113,21 @@ void QuarantineCache::show() {
                qe.user_beg, qe.user_beg + qe.user_size,
                qe.alloc_beg + qe.alloc_size);
   }
+}
+
+QuarantineElement QuarantineCache::find(uptr addr) {
+  pthread_mutex_lock(&mutex);
+  QuarantineElement ret;
+  ret.alloc_beg = (uptr)-1;
+  if (m_queue) {
+    for (QuarantineNode *node = m_queue->head; node; node = node->next) {
+      const QuarantineElement &qe = node->data;
+      if (qe.user_beg <= addr && addr < qe.user_beg + qe.user_size) {
+        ret = qe;
+        break;
+      }
+    }
+  }
+  pthread_mutex_unlock(&mutex);
+  return ret;
 }

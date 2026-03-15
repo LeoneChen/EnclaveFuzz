@@ -46,3 +46,7 @@ size_t malloc_usable_size(void *mem);
 #if defined(__cplusplus)
 }
 #endif
+
+bool GetHeapChunkBT(uptr user_beg, uint64_t **malloc_bt, size_t *malloc_cnt,
+                    uint64_t **free_bt, size_t *free_cnt);
+void FreeHeapChunkBT(uptr user_beg);

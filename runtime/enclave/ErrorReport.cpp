@@ -1,4 +1,6 @@
 #include "ErrorReport.hpp"
+#include "Malloc.hpp"
+#include "Quarantine.hpp"
 #include "SGXSanRTTBridge.hpp"
 #include <cstdlib>
 #include <stdarg.h>
@@ -79,6 +81,29 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
              "0x%lx)\n\n",
              pc, (is_write ? "write" : "read"), addr, access_size, bp, sp);
   sgxsan_backtrace(ll);
+
+  if (AddrIsInMem(addr)) {
+    uint8_t shadow = *(uint8_t *)MEM_TO_SHADOW(addr);
+    if (shadow == (uint8_t)kAsanHeapFreeMagic) {
+      QuarantineElement qe = QuarantineCache::find(addr);
+      if (qe.alloc_beg != (uptr)-1) {
+        uint64_t *malloc_bt, *free_bt;
+        size_t malloc_cnt, free_cnt;
+        if (GetHeapChunkBT(qe.user_beg, &malloc_bt, &malloc_cnt, &free_bt,
+                           &free_cnt)) {
+          if (malloc_cnt > 0) {
+            sgxsan_log(ll, false, "\nAllocation stack:\n");
+            sgxsan_ocall_addr2line(malloc_bt, malloc_cnt, ll);
+          }
+          if (free_cnt > 0) {
+            sgxsan_log(ll, false, "\nFree stack:\n");
+            sgxsan_ocall_addr2line(free_bt, free_cnt, ll);
+          }
+        }
+      }
+    }
+  }
+
   PrintShadowMap(ll, addr);
   sgxsan_log(ll, false, "================= Report End =================\n");
   if (fatal)
