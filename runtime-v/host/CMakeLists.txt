@@ -29,4 +29,4 @@ add_library(
     test.cpp
 )
 
-set_target_properties(sgxsan_host_v PROPERTIES POSITION_INDEPENDENT_CODE True)
+set_target_properties(sgxsan_host_v PROPERTIES POSITION_INDEPENDENT_CODE True OUTPUT_NAME "sgxsan_host")

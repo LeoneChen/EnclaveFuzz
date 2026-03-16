@@ -88,7 +88,7 @@ else
 fi
 CC="${MY_CC}" CXX="${MY_CXX}" cmake -B ${PROJ_DIR}/build/enclave_fuzz ${CMAKE_FLAGS}
 cmake --build ${PROJ_DIR}/build/enclave_fuzz -j$(nproc)
-cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan --prefix ${PROJ_DIR}/install/enclave_fuzz
+cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan --prefix ${PROJ_DIR}/install/enclave_fuzz_n
 cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan_v --prefix ${PROJ_DIR}/install/enclave_fuzz_v
 
 ########## Build SGX SDK ##########
@@ -271,6 +271,8 @@ build_sdk() {
 }
 
 if [ ${BUILD_SDK} -eq 1 ]; then
-    build_sdk "${PROJ_DIR}/third_party/linux-sgx" "${PROJ_DIR}/install/enclave_fuzz" 0 "-fsanitize=address -mllvm -asan-enclave -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table"
+    build_sdk "${PROJ_DIR}/third_party/linux-sgx" "${PROJ_DIR}/install/enclave_fuzz_n" 0 "-fsanitize=address -mllvm -asan-enclave -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table"
     build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table"
 fi
+
+ln -sf enclave_fuzz_v ${PROJ_DIR}/install/enclave_fuzz
