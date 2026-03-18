@@ -163,7 +163,7 @@ if [ ${BUILD} -eq 1 ]; then
                 ./autoconf.bash
                 if [ ${AS_FUZZ} -eq 1 ]; then
                     if [ ${DEBUG} -eq 1 ]; then
-                        ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CFLAGS=" -Og -g" CXXFLAGS=" -Og -g" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz --enable-sgx-simulation
+                        ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CFLAGS=" -Og -g" CXXFLAGS=" -Og -g" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
                     else
                         ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz
                     fi

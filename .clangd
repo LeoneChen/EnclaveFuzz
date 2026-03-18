@@ -5,6 +5,7 @@ CompileFlags:
         # -I/home/leone/EnclaveFuzz/runtime/enclave,
         # -I/home/leone/EnclaveFuzz/runtime/host,
         # llvm-project
+        -I/home/leone/EnclaveFuzz/install/llvm-project/lib/clang/13.0.1/include/fuzzer,
         # -I/home/leone/EnclaveFuzz/third_party/llvm-project/compiler-rt/include/fuzzer,
         # -I/home/leone/EnclaveFuzz/third_party/llvm-project/llvm/include,
         # -I/home/leone/EnclaveFuzz/install/llvm-project/include/,

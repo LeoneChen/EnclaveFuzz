@@ -272,7 +272,5 @@ build_sdk() {
 
 if [ ${BUILD_SDK} -eq 1 ]; then
     build_sdk "${PROJ_DIR}/third_party/linux-sgx" "${PROJ_DIR}/install/enclave_fuzz_n" 0 "-fsanitize=address -mllvm -asan-enclave -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table"
-    build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table"
+    # build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table"
 fi
-
-ln -sf enclave_fuzz_v ${PROJ_DIR}/install/enclave_fuzz

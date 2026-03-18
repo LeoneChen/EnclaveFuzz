@@ -161,10 +161,10 @@
             "request": "launch",
             "program": "${workspaceFolder}/workdir/sgxwallet/TestApp",
             "args": [
-                // "./result/seeds",
-                // "-artifact_prefix=./result/crashes/",
-                "./result/crashes/crash-1efe133306997d930c649d55181717808fe6eb5b",
-                // "-rss_limit_mb=10240",
+                "./result/seeds",
+                "-artifact_prefix=./result/crashes/",
+                // "./result/crashes/timeout-da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                "-rss_limit_mb=10240",
                 // "-print_coverage=1",
                 // "-runs=0"
                 // "-fork=1",
@@ -196,6 +196,9 @@
                 },
                 {
                     "text": "-gdb-set substitute-path /home/leone/EnclaveFuzz/third_party/linux-sgx/sdk/simulation/urtssim/linux/enter_enclave.S /home/leone/EnclaveFuzz/third_party/linux-sgx/psw/urts/linux/enter_enclave.S",
+                },
+                {
+                    "text": "-gdb-set substitute-path /libunwind /home/leone/EnclaveFuzz/third_party/linux-sgx/sdk/cpprt/linux/libunwind/",
                 }
             ]
         },

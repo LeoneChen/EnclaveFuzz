@@ -89,11 +89,9 @@ static void AsanInitInternal() {
     return;
 
   init_shadow_memory_out_enclave();
-
-  asan_inited = 1;
-
   sgxsan_assert(sgx_register_exception_handler(1, sgxsan_exception_handler) !=
                 nullptr);
+  asan_inited = 1;
 }
 
 extern "C" {
@@ -135,7 +133,7 @@ void __asan_handle_no_return() {
 }
 
 __attribute__((destructor)) void dump_sancov() {
-  log_debug("dump_sancov\n");
+  log_warning("dump_sancov\n");
   memcpy_s((void *)g_sancov_copy_cntrs_start,
            g_sancov_copy_cntrs_end - g_sancov_copy_cntrs_start,
            g_sancov_cntrs_start, g_sancov_cntrs_end - g_sancov_cntrs_start);

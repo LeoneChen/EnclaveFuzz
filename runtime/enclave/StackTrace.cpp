@@ -45,6 +45,33 @@ size_t libunwind_backtrace(uint64_t *ret_addrs, size_t max_count) {
   return count;
 }
 
+// Best-effort rbp-based backtrace for use inside MALLOC/FREE.
+// Uses no heap allocation, safe against re-entrancy.
+size_t rbp_backtrace(uint64_t *ret_addrs, size_t max_count) {
+  uint64_t *fp;
+  __asm__ volatile("mov %%rbp, %0" : "=r"(fp));
+
+  size_t count = 0;
+  while (count < max_count) {
+    if (!fp || ((uintptr_t)fp & 7) || !sgx_is_within_enclave(fp, 16))
+      break;
+
+    uint64_t ret_addr = fp[1];
+    uint64_t *next_fp = (uint64_t *)fp[0];
+
+    if (!ret_addr || !sgx_is_within_enclave((const void *)ret_addr, 1))
+      break;
+
+    ret_addrs[count++] = ret_addr;
+
+    if (next_fp <= fp)
+      break;
+
+    fp = next_fp;
+  }
+  return count;
+}
+
 void sgxsan_backtrace(log_level ll) {
   uint64_t ret_addrs[kMaxStackFrames];
   size_t count = libunwind_backtrace(ret_addrs, kMaxStackFrames);

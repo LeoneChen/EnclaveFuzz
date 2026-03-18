@@ -7,7 +7,7 @@
 #include "SGXSanRTEnclave.hpp"
 #include <pthread.h>
 
-extern size_t libunwind_backtrace(uint64_t *ret_addrs, size_t max_count);
+extern size_t rbp_backtrace(uint64_t *ret_addrs, size_t max_count);
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t global_heap_usage = 0;
@@ -108,7 +108,7 @@ void *MALLOC(size_t size) {
   m->user_size = size;
   m->bt = static_cast<HeapBT *>(dlmalloc(sizeof(HeapBT)));
   if (m->bt) {
-    m->bt->malloc_bt_cnt = libunwind_backtrace(m->bt->malloc_bt, kMaxBTFrames);
+    m->bt->malloc_bt_cnt = rbp_backtrace(m->bt->malloc_bt, kMaxBTFrames);
     m->bt->free_bt_cnt = 0;
   }
   log_trace("\n");
@@ -162,7 +162,7 @@ void FREE(void *ptr) {
         .user_beg = user_beg,
         .user_size = m->user_size};
   if (m->bt)
-    m->bt->free_bt_cnt = libunwind_backtrace(m->bt->free_bt, kMaxBTFrames);
+    m->bt->free_bt_cnt = rbp_backtrace(m->bt->free_bt, kMaxBTFrames);
   QuarantineCache::put(qe);
   return;
 
