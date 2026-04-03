@@ -161,9 +161,9 @@
             "request": "launch",
             "program": "${workspaceFolder}/workdir/sgxwallet/TestApp",
             "args": [
-                "./result/seeds",
-                "-artifact_prefix=./result/crashes/",
-                // "./result/crashes/timeout-da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                // "./result/seeds",
+                // "-artifact_prefix=./result/crashes/",
+                "./result/crashes/crash-2b58a76ce18be588e92948f2fc369c307d63ede0",
                 "-rss_limit_mb=10240",
                 // "-print_coverage=1",
                 // "-runs=0"

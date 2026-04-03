@@ -133,7 +133,7 @@ void __asan_handle_no_return() {
 }
 
 __attribute__((destructor)) void dump_sancov() {
-  log_warning("dump_sancov\n");
+  log_debug("dump_sancov\n");
   memcpy_s((void *)g_sancov_copy_cntrs_start,
            g_sancov_copy_cntrs_end - g_sancov_copy_cntrs_start,
            g_sancov_cntrs_start, g_sancov_cntrs_end - g_sancov_cntrs_start);

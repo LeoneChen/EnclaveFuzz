@@ -154,7 +154,7 @@ static inline uptr RoundUpDiv(uptr x, uptr boundary) {
 
 /* Memory tools */
 static inline bool AddrIsInLowMem(uptr a) {
-  return kLowMemBeg <= a && a <= kLowMemEnd;
+  return a <= kLowMemEnd;
 }
 
 static inline bool AddrIsInHighMem(uptr a) {

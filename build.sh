@@ -2,17 +2,11 @@
 set -e
 
 PROJ_DIR=$(realpath $(dirname $0))
-
 IS_DEBUG=0
 PREPARE_SDK=0
 BUILD_SDK=0
-
-MY_CC=${PROJ_DIR}/install/llvm-project/bin/clang
-MY_CXX=${PROJ_DIR}/install/llvm-project/bin/clang++
-
 JOBS=$(nproc)
-
-COMMON_COMPILE_FLAGS=""
+MY_FLAGS=""
 
 show_help() {
     echo "Usage: $0 [options]"
@@ -34,7 +28,7 @@ while true; do
             ;;
         -g)
             IS_DEBUG=1
-            COMMON_COMPILE_FLAGS+=" -g -O0"
+            MY_FLAGS+=" -g -O0"
             export DEBUG=1
             shift
             ;;
@@ -55,12 +49,6 @@ while true; do
             ;;
     esac
 done
-
-COMMON_COMPILE_FLAGS+=" -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes"
-
-echo "[+] CC: ${MY_CC}"
-echo "[+] CXX: ${MY_CXX}"
-echo "[+] COMMON_COMPILE_FLAGS: ${COMMON_COMPILE_FLAGS}"
 
 ########## Prepare SGX SDK ##########
 if [ ${PREPARE_SDK} -eq 1 ]; then
@@ -86,7 +74,7 @@ if [ ${IS_DEBUG} -eq 1 ]; then
 else
     CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=Release"
 fi
-CC="${MY_CC}" CXX="${MY_CXX}" cmake -B ${PROJ_DIR}/build/enclave_fuzz ${CMAKE_FLAGS}
+cmake -B ${PROJ_DIR}/build/enclave_fuzz ${CMAKE_FLAGS}
 cmake --build ${PROJ_DIR}/build/enclave_fuzz -j$(nproc)
 cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan --prefix ${PROJ_DIR}/install/enclave_fuzz_n
 cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan_v --prefix ${PROJ_DIR}/install/enclave_fuzz_v
@@ -97,6 +85,9 @@ build_sdk() {
     local INSTALL_DIR=$2
     local OPT=$3
     local ENCLAVE_COMPILE_FLAGS=$4
+    local MY_CC=${5}
+    local MY_CXX=${6}
+    local COMMON_COMPILE_FLAGS=${7}
 
     export SGX_SDK=${INSTALL_DIR}
 
@@ -271,6 +262,6 @@ build_sdk() {
 }
 
 if [ ${BUILD_SDK} -eq 1 ]; then
-    build_sdk "${PROJ_DIR}/third_party/linux-sgx" "${PROJ_DIR}/install/enclave_fuzz_n" 0 "-fsanitize=address -mllvm -asan-enclave -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table"
-    # build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table"
+    build_sdk "${PROJ_DIR}/third_party/linux-sgx" "${PROJ_DIR}/install/enclave_fuzz_n" 0 "" "gcc" "g++" "${MY_FLAGS}"
+    # build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table" "${PROJ_DIR}/install/llvm-project/bin/clang" "${PROJ_DIR}/install/llvm-project/bin/clang++" "${MY_FLAGS} -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes"
 fi

@@ -18,15 +18,33 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <sys/time.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <vector>
 
 sgx_enclave_id_t __g_harness_eid = 0;
 FuzzedDataProvider *g_fdp = nullptr;
-std::vector<uint8_t *> g_alloc_mgr;
+
+// Bump-pointer arena for enclave-facing host buffers.
+// Enclave ASAN does not check host memory OOB; an OOB write from the enclave
+// can corrupt glibc malloc chunk metadata, causing free() to abort() while
+// holding the arena mutex.  LibFuzzer's crash handler (PrintCoverage etc.)
+// then calls malloc, deadlocking on the same mutex.
+// Fix: keep all enclave ECall parameter buffers off the glibc heap entirely.
+static uint8_t *g_arena = nullptr;
+static size_t g_arena_used = 0;
+static const size_t G_ARENA_CAP = 8 * 1024 * 1024; // 8 MB
+
+uint8_t *g_arena_alloc(size_t size) {
+  size = (size + 7u) & ~7u;
+  if (g_arena_used + size > G_ARENA_CAP) {
+    fprintf(stderr, "[!] g_arena overflow: need %zu, used %zu / %zu\n", size,
+            g_arena_used, G_ARENA_CAP);
+    abort();
+  }
+  uint8_t *p = g_arena + g_arena_used;
+  g_arena_used += size;
+  return p;
+}
 
 extern "C" {
 
@@ -40,6 +58,14 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   (void)argc;
   (void)argv;
   sancov_copy_init();
+  g_arena = (uint8_t *)mmap(nullptr, G_ARENA_CAP + 4096, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (g_arena == MAP_FAILED) {
+    perror("[!] arena mmap");
+    abort();
+  }
+  mprotect(g_arena + G_ARENA_CAP, 4096,
+           PROT_NONE); // guard page: catch OOB past arena end
   customized_init();
   return 0;
 }
@@ -58,7 +84,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
       &__g_harness_eid, NULL);
   if (create_ret != SGX_SUCCESS) {
     fprintf(stderr, "[!] sgx_create_enclave fail: 0x%x\n", create_ret);
-    abort();
+    return 0;  // EPC exhaustion or transient SGX error, skip this input
   }
 
   customized_harness();
@@ -69,10 +95,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     abort();
   }
 
-  for (auto memArea : g_alloc_mgr) {
-    free(memArea);
-  }
-  g_alloc_mgr.clear();
+  madvise(g_arena, G_ARENA_CAP, MADV_DONTNEED);
+  g_arena_used = 0;
 
   return 0;
 }

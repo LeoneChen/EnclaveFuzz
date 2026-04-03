@@ -237,52 +237,52 @@ if [ ${AS_FUZZ} -eq 1 ]; then
     case "${TARGET_NAME}" in
         "wasm-micro-runtime")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app product-mini/platforms/linux-sgx/enclave-sample/iwasm --enclave product-mini/platforms/linux-sgx/enclave-sample/enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 1
+                ${PROJ_DIR}/script/setup.sh --app product-mini/platforms/linux-sgx/enclave-sample/iwasm --enclave product-mini/platforms/linux-sgx/enclave-sample/enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "intel-sgx-ssl")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app Linux/sgx/test_app/TestApp --enclave Linux/sgx/test_app/TestEnclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 2
+                ${PROJ_DIR}/script/setup.sh --app Linux/sgx/test_app/TestApp --enclave Linux/sgx/test_app/TestEnclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "sgxwallet")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app sgxwallet --enclave secure_enclave/secure_enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 3 --extra-flags="-rss_limit_mb=10240"
+                ${PROJ_DIR}/script/setup.sh --app sgxwallet --enclave secure_enclave/secure_enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "SGX_SQLite")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app app --enclave enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 4
+                ${PROJ_DIR}/script/setup.sh --app app --enclave enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "ehsm")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app out/ehsm-core/ehsm_core_test --enclave out/ehsm-core/libenclave-ehsm-core.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 5
+                ${PROJ_DIR}/script/setup.sh --app out/ehsm-core/ehsm_core_test --enclave out/ehsm-core/libenclave-ehsm-core.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "sgx-reencrypt")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app bin/test-app --enclave reencrypt.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 6
+                ${PROJ_DIR}/script/setup.sh --app bin/test-app --enclave reencrypt.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "sgx-wallet")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app sgx-wallet --enclave enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 7
+                ${PROJ_DIR}/script/setup.sh --app sgx-wallet --enclave enclave.signed.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "SGXCryptoFile")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app sgxCryptoFile --enclave CryptoEnclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 8
+                ${PROJ_DIR}/script/setup.sh --app sgxCryptoFile --enclave CryptoEnclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "mbedtls-SGX")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app build/s_client --enclave build/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 9
+                ${PROJ_DIR}/script/setup.sh --app build/s_client --enclave build/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "TaLoS")
             pushd ${TARGET_DIR}
-                ${PROJ_DIR}/script/setup.sh --app crypto/link --enclave crypto/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME} --taskset 10
+                ${PROJ_DIR}/script/setup.sh --app crypto/link --enclave crypto/enclave.so --workdir ${PROJ_DIR}/workdir/${TARGET_NAME}
             popd
             ;;
         "SampleSGXSan")
