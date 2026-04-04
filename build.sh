@@ -263,5 +263,5 @@ build_sdk() {
 
 if [ ${BUILD_SDK} -eq 1 ]; then
     build_sdk "${PROJ_DIR}/third_party/linux-sgx" "${PROJ_DIR}/install/enclave_fuzz_n" 0 "" "gcc" "g++" "${MY_FLAGS}"
-    # build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table" "${PROJ_DIR}/install/llvm-project/bin/clang" "${PROJ_DIR}/install/llvm-project/bin/clang++" "${MY_FLAGS} -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes"
+    build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table" "${PROJ_DIR}/install/llvm-project/bin/clang" "${PROJ_DIR}/install/llvm-project/bin/clang++" "${MY_FLAGS} -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes"
 fi

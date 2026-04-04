@@ -163,8 +163,8 @@
             "args": [
                 // "./result/seeds",
                 // "-artifact_prefix=./result/crashes/",
-                "./result/crashes/crash-2b58a76ce18be588e92948f2fc369c307d63ede0",
-                "-rss_limit_mb=10240",
+                "./result/seeds/001e6151b42a01614d5b13ce4f4541a53d9c312e",
+                // "-rss_limit_mb=10240",
                 // "-print_coverage=1",
                 // "-runs=0"
                 // "-fork=1",
@@ -175,7 +175,7 @@
             "environment": [
                 {
                     "name": "LD_LIBRARY_PATH",
-                    "value": "/home/leone/EnclaveFuzz/install/enclave_fuzz/lib64"
+                    "value": "/home/leone/EnclaveFuzz/install/enclave_fuzz_v/lib64"
                 }
             ],
             "externalConsole": false,
@@ -190,15 +190,6 @@
                     "description": "Set Disassembly Flavor to Intel",
                     "text": "-gdb-set disassembly-flavor intel",
                     "ignoreFailures": true
-                },
-                {
-                    "text": "-gdb-set substitute-path /build/glibc-B3wQXB/glibc-2.31/ /home/leone/glibc-2.31",
-                },
-                {
-                    "text": "-gdb-set substitute-path /home/leone/EnclaveFuzz/third_party/linux-sgx/sdk/simulation/urtssim/linux/enter_enclave.S /home/leone/EnclaveFuzz/third_party/linux-sgx/psw/urts/linux/enter_enclave.S",
-                },
-                {
-                    "text": "-gdb-set substitute-path /libunwind /home/leone/EnclaveFuzz/third_party/linux-sgx/sdk/cpprt/linux/libunwind/",
                 }
             ]
         },

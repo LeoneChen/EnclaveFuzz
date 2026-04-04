@@ -77,13 +77,13 @@ static std::string sgxsan_exec(const char *cmd) {
   return result;
 }
 
-/// SancovInit：在 Enclave 加载后、fuzzer 启动前初始化 sancov 代理方案
+/// sancov_copy_init：在 Enclave 加载后、fuzzer 启动前初始化 sancov 代理方案
 /// 流程：
 ///   1. 用 `size` 命令读取 Enclave ELF 中 __sancov_cntrs / __sancov_pcs 段大小
 ///   2. 分配等大的代理缓冲区
 ///   3. mmap 假基址区间（防止真实映射占用该地址）
 ///   4. 将代理缓冲区注册给 libfuzzer
-void SancovInit() {
+void sancov_copy_init() {
   // Read section sizes from ELF without loading the DSO
   std::string result = sgxsan_exec(
       "size -A TestEnclave | grep __sancov_cntrs | awk '{print $2}'");
@@ -107,7 +107,7 @@ void SancovInit() {
   g_sancov_proxy_cntrs_start = (uint8_t *)calloc(1, cntrs_size);
   g_sancov_proxy_pcs_start = (uintptr_t *)calloc(1, pcs_size);
   sgxsan_error(!g_sancov_proxy_cntrs_start || !g_sancov_proxy_pcs_start,
-               "SancovInit: proxy buffer allocation failed\n");
+               "sancov_copy_init: proxy buffer allocation failed\n");
   g_sancov_proxy_cntrs_end = g_sancov_proxy_cntrs_start + cntrs_size;
   g_sancov_proxy_pcs_end =
       (uintptr_t *)((uint8_t *)g_sancov_proxy_pcs_start + pcs_size);
@@ -116,7 +116,7 @@ void SancovInit() {
   void *ret = mmap((void *)ENCLAVE_FAKE_BASE, ENCLAVE_FAKE_SIZE, PROT_NONE,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
   sgxsan_error(ret == MAP_FAILED,
-               "SancovInit fatal: failed to reserve fake enclave base 0x%lx, "
+               "sancov_copy_init fatal: failed to reserve fake enclave base 0x%lx, "
                "symbolization may be inaccurate\n",
                ENCLAVE_FAKE_BASE);
 

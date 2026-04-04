@@ -113,8 +113,8 @@ void sgxsan_log(log_level ll, bool with_prefix, const char *fmt, ...);
 void SGXSanLogEnter(const char *str);
 
 // ── sancov 代理接口（Symbolizer.cpp 实现）────────────────────────────────
-/// SancovInit：在 Enclave 加载后初始化 sancov 代理缓冲区并注册给 libfuzzer
-void SancovInit();
+/// sancov_copy_init：在 Enclave 加载后初始化 sancov 代理缓冲区并注册给 libfuzzer
+void sancov_copy_init();
 /// DumpSancov：在 dlclose 前将 Enclave 计数器/PC 同步到代理缓冲区
 void DumpSancov();
 /// 由 Enclave 侧 sancov 钩子调用，记录计数器/PC 段地址
