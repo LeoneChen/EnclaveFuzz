@@ -1,2 +1,0 @@
-add_subdirectory(SGXSanRTApp)
-add_subdirectory(SGXSanRTEnclave)

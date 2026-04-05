@@ -1,30 +1,51 @@
-[submodule "ThirdParty/SVF"]
-	path = ThirdParty/SVF
-	url = git@github.com:SVF-tools/SVF.git
-[submodule "ThirdParty/plthook"]
-	path = ThirdParty/plthook
-	url = git@github.com:kubo/plthook.git
-[submodule "ThirdParty/edger8r"]
-	path = ThirdParty/edger8r
+[submodule "third_party/edger8r"]
+	path = third_party/edger8r
 	url = git@github.com:LeoneChen/edger8r.git
-[submodule "ThirdParty/json"]
-	path = ThirdParty/json
-	url = git@github.com:nlohmann/json.git
-[submodule "ThirdParty/libFuzzer"]
-	path = ThirdParty/libFuzzer
-	url = git@github.com:LeoneChen/libFuzzer.git
-[submodule "ThirdParty/magic_enum"]
-	path = ThirdParty/magic_enum
-	url = git@github.com:Neargye/magic_enum.git
-[submodule "ThirdParty/linux-sgx"]
-	path = ThirdParty/linux-sgx
-	url = git@github.com:intel/linux-sgx.git
-[submodule "kAFL"]
-	path = kAFL
-	url = git@github.com:IntelLabs/kAFL.git
-[submodule "ThirdParty/intel-sgx-ssl"]
-	path = ThirdParty/intel-sgx-ssl
+[submodule "third_party/linux-sgx"]
+	path = third_party/linux-sgx
+	url = git@github.com:LeoneChen/linux-sgx.git
+[submodule "sgx_apps/intel-sgx-ssl"]
+	path = sgx_apps/intel-sgx-ssl
 	url = git@github.com:LeoneChen/intel-sgx-ssl.git
-[submodule "ThirdParty/linux-sgx-build-scripts"]
-	path = ThirdParty/linux-sgx-build-scripts
-	url = git@github.com:LeoneChen/linux-sgx-build-scripts.git
+[submodule "sgx_apps/BiORAM-SGX"]
+	path = sgx_apps/BiORAM-SGX
+	url = git@github.com:LeoneChen/BiORAM-SGX.git
+[submodule "sgx_apps/SGXCryptoFile"]
+	path = sgx_apps/SGXCryptoFile
+	url = git@github.com:LeoneChen/SGXCryptoFile.git
+[submodule "sgx_apps/SGX_SQLite"]
+	path = sgx_apps/SGX_SQLite
+	url = git@github.com:LeoneChen/SGX_SQLite.git
+[submodule "sgx_apps/bolos-enclave"]
+	path = sgx_apps/bolos-enclave
+	url = git@github.com:LeoneChen/bolos-enclave.git
+[submodule "sgx_apps/ehsm"]
+	path = sgx_apps/ehsm
+	url = git@github.com:LeoneChen/ehsm.git
+[submodule "sgx_apps/mbedtls-SGX"]
+	path = sgx_apps/mbedtls-SGX
+	url = git@github.com:LeoneChen/mbedtls-SGX.git
+[submodule "sgx_apps/sgx-reencrypt"]
+	path = sgx_apps/sgx-reencrypt
+	url = git@github.com:LeoneChen/sgx-reencrypt.git
+[submodule "sgx_apps/sgx-wallet"]
+	path = sgx_apps/sgx-wallet
+	url = git@github.com:LeoneChen/sgx-wallet.git
+[submodule "sgx_apps/sgxwallet"]
+	path = sgx_apps/sgxwallet
+	url = git@github.com:LeoneChen/sgxwallet.git
+[submodule "sgx_apps/trusted-function-framework"]
+	path = sgx_apps/trusted-function-framework
+	url = git@github.com:LeoneChen/trusted-function-framework.git
+[submodule "sgx_apps/wasm-micro-runtime"]
+	path = sgx_apps/wasm-micro-runtime
+	url = git@github.com:LeoneChen/wasm-micro-runtime.git
+[submodule "third_party/llvm-project"]
+	path = third_party/llvm-project
+	url = git@github.com:llvm/llvm-project.git
+[submodule "sgx_apps/TaLoS"]
+	path = sgx_apps/TaLoS
+	url = git@github.com:LeoneChen/libressl-2.4.1.git
+[submodule "EnclavePatch-Data"]
+	path = EnclavePatch-Data
+	url = git@github.com:LeoneChen/EnclavePatch-Data.git
