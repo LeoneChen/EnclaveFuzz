@@ -10,6 +10,7 @@
 #include "Malloc.h"
 #include "PoisonCheck.h"
 #include "Quarantine.h"
+#include "SGXSanRTApp.h"
 #include <stdarg.h>
 
 /// 统一报告分隔线（与 ASan 风格一致）
@@ -105,16 +106,18 @@ void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
 
 /// ReportHeapError：ReportUseAfterFree / ReportDoubleFree 的公共实现
 static void ReportHeapError(const char *kind, uptr pc, uptr bp, uptr sp,
-                            uptr addr, MallocFreeBT &bt) {
+                            uptr addr, MallocFreeBT *bt) {
   log_error_np(
       "\n" SGXSAN_SEP "[!] SGXSan ERROR: %s %s %p at pc %p bp %p sp %p\n\n",
       sgx_is_within_enclave((const void *)addr, 1) ? "Enclave" : "Host", kind,
       (void *)addr, (void *)pc, (void *)bp, (void *)sp);
   sgxsan_backtrace(LOG_LEVEL_ERROR);
-  log_error_np("\nPreviously malloc at:\n\n");
-  sgxsan_dump_bt_buf((void **)bt.malloc_bt, bt.malloc_bt_cnt);
-  log_error_np("\nPreviously free at:\n\n");
-  sgxsan_dump_bt_buf((void **)bt.free_bt, bt.free_bt_cnt);
+  if (bt) {
+    log_error_np("\nPreviously malloc at:\n\n");
+    sgxsan_dump_bt_buf((void **)bt->malloc_bt, bt->malloc_bt_cnt);
+    log_error_np("\nPreviously free at:\n\n");
+    sgxsan_dump_bt_buf((void **)bt->free_bt, bt->free_bt_cnt);
+  }
   PrintShadowMap(LOG_LEVEL_ERROR, addr);
   log_error_np(SGXSAN_SEP);
   Die();
@@ -125,14 +128,20 @@ void ReportUseAfterFree(uptr pc, uptr bp, uptr sp, uptr addr) {
   auto entry = gQCache->find(addr);
   sgxsan_assert(entry.alloc_beg != (uptr)-1);
   auto *m = (chunk *)(entry.user_beg - sizeof(chunk));
-  sgxsan_assert(m->bt);
-  ReportHeapError("Use after free", pc, bp, sp, addr, *m->bt);
+  sgxsan_assert((uptr)m >= 0x1000);                 // m 地址合法
+  sgxsan_assert(m->magic == kHeapObjectChunkMagic); // m 魔数合法
+  sgxsan_error((uptr)m->bt < 0x1000 && m->bt != nullptr, "m=%p m->bt=%p\n", m,
+               m->bt); // bt 指针合法
+  ReportHeapError("Use after free", pc, bp, sp, addr, m->bt);
 }
 
 void ReportDoubleFree(uptr pc, uptr bp, uptr sp, uptr addr) {
   auto *m = (chunk *)(addr - sizeof(chunk));
-  sgxsan_assert(m->bt);
-  ReportHeapError("Double Free", pc, bp, sp, addr, *m->bt);
+  sgxsan_assert((uptr)m >= 0x1000);                 // m 地址合法
+  sgxsan_assert(m->magic == kHeapObjectChunkMagic); // m 魔数合法
+  sgxsan_error((uptr)m->bt < 0x1000 && m->bt != nullptr, "m=%p m->bt=%p\n", m,
+               m->bt); // bt 指针合法
+  ReportHeapError("Double Free", pc, bp, sp, addr, m->bt);
 }
 
 void ReportDoubleFetch(uptr cur_fetch, size_t cur_size, uptr prev_fetch,

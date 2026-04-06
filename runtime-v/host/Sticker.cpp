@@ -134,7 +134,7 @@ thread_local std::stack<std::vector<void *>> OCAllocStack;
 /// OCall 内临时内存分配（由 Enclave 侧 edger8r 生成的 sgx_ocalloc 调用）
 void *sgx_ocalloc(size_t size) {
   auto &top = OCAllocStack.top();
-  void *ocallocAddr = sgxsan_malloc(size);
+  void *ocallocAddr = malloc(size);
   sgxsan_assert(ocallocAddr);
   top.push_back(ocallocAddr);
   return ocallocAddr;
@@ -144,7 +144,7 @@ void *sgx_ocalloc(size_t size) {
 void sgx_ocfree() {
   auto &top = OCAllocStack.top();
   for (auto ocallocAddr : top) {
-    sgxsan_free(ocallocAddr);
+    free(ocallocAddr);
   }
 }
 
@@ -153,7 +153,7 @@ void ClearOCAllocStack() {
   while (!OCAllocStack.empty()) {
     auto &top = OCAllocStack.top();
     for (auto ocallocAddr : top) {
-      sgxsan_free(ocallocAddr);
+      free(ocallocAddr);
     }
     top.clear();
     OCAllocStack.pop();

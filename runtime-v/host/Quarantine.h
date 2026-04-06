@@ -11,6 +11,7 @@
 ///
 /// 隔离队列容量由系统资源限制动态计算，最大不超过 SGXSAN_MAX_QUARANTINE_SIZE。
 
+#include "Malloc.h"
 #include "Poison.h"
 #include "SGXSanRTApp.h"
 #include <deque>
@@ -26,7 +27,8 @@ struct QuarantineElement {
   uptr user_size;  // 用户请求的大小
 };
 
-typedef std::deque<QuarantineElement> QuarantineQueue;
+typedef std::deque<QuarantineElement, ContainerAllocator<QuarantineElement>>
+    QuarantineQueue;
 
 /// 隔离缓存最大占用字节数（256 MB）
 #define SGXSAN_MAX_QUARANTINE_SIZE 0x10000000

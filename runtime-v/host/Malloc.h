@@ -11,23 +11,32 @@
 ///   chunk 元数据紧贴用户数据左侧，包含原始分配地址、大小等信息
 
 #include "Poison.h"
-#include "Quarantine.h"
 #include "SGXSanRTApp.h"
 #include <pthread.h>
 #include <stddef.h>
 
+/// chunk 魔数：用于校验 user_beg - sizeof(chunk) 处确实是 chunk 元数据，
+/// 而非 SGXSanInit 前通过原始 malloc 分配的指针
+const size_t kHeapObjectChunkMagic = 0xDEADBEEF;
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
+void *__libc_malloc(size_t size) noexcept;
+void __libc_free(void *ptr) noexcept;
+void *__libc_calloc(size_t nmemb, size_t size) noexcept;
+void *__libc_realloc(void *ptr, size_t size) noexcept;
+
 /// InitHeapAllocator：在 SGXSanInit 前懒初始化 gQCache
 void InitHeapAllocator();
-void *sgxsan_malloc(size_t size);
+
+void *malloc(size_t size) noexcept;
 void *sgxsan_malloc_raw(size_t size, uptr alignment);
-void sgxsan_free(void *ptr);
+void free(void *ptr) noexcept;
 void sgxsan_free_raw(void *ptr, uptr alignment, uptr expected_size);
-void *sgxsan_calloc(size_t n_elements, size_t elem_size);
-void *sgxsan_realloc(void *oldmem, size_t bytes);
-size_t sgxsan_malloc_usable_size(void *mem);
+void *calloc(size_t n_elements, size_t elem_size) noexcept;
+void *realloc(void *oldmem, size_t bytes) noexcept;
+size_t malloc_usable_size(void *mem) noexcept;
 #if defined(__cplusplus)
 }
 #endif
@@ -53,9 +62,6 @@ static inline uint32_t RZLog2Size(uint32_t rz_log) {
 
 static inline uptr ComputeRZSize(uptr size) { return 16 << ComputeRZLog(size); }
 
-/// update_heap_usage：在 DEBUG 日志级别下跟踪全局堆用量（统计用）
-void update_heap_usage(void *ptr, bool is_alloc = true);
-
 /// chunk：嵌入左红区末尾的元数据，记录本次分配的原始信息
 struct chunk {
   size_t magic;      // 校验魔数，确保查询到的 user_beg 合法
@@ -64,3 +70,76 @@ struct chunk {
   size_t user_size;  // 用户请求的大小
   MallocFreeBT *bt;  // malloc/free 调用栈（DFEnableCollectStack 时分配）
 };
+
+template <class T> class ContainerAllocator {
+public:
+  // type definitions
+  typedef T value_type;
+  typedef T *pointer;
+  typedef const T *const_pointer;
+  typedef T &reference;
+  typedef const T &const_reference;
+  typedef size_t size_type;
+  typedef ptrdiff_t difference_type;
+
+  // rebind allocator to type U
+  template <class U> struct rebind {
+    typedef ContainerAllocator<U> other;
+  };
+
+  // return address of values
+  pointer address(reference value) const { return &value; }
+  const_pointer address(const_reference value) const { return &value; }
+
+  /* constructors and destructor
+   * - nothing to do because the allocator has no state
+   */
+  ContainerAllocator() noexcept {}
+  ContainerAllocator(const ContainerAllocator &) noexcept {}
+  template <class U>
+  ContainerAllocator(const ContainerAllocator<U> &) noexcept {}
+  ~ContainerAllocator() noexcept {}
+
+  // return maximum number of elements that can be allocated
+  size_type max_size() const noexcept { return size_type(~0) / sizeof(T); }
+
+  // allocate but don't initialize num elements of type T
+  pointer allocate(size_type num, const void * = 0) {
+    sgxsan_assert(num <= max_size());
+    pointer ret = (pointer)(__libc_malloc(num * sizeof(T)));
+    sgxsan_assert(ret != nullptr);
+    return ret;
+  }
+
+  // initialize elements of allocated storage p with value value
+  void construct(pointer p, const T &value) {
+    // initialize memory with placement new
+    new ((void *)p) T(value);
+  }
+
+  // destroy elements of initialized storage p
+  void destroy(pointer p) {
+    // destroy objects by calling their destructor
+    p->~T();
+  }
+
+  // deallocate storage p of deleted elements
+  void deallocate(pointer p, size_type num) {
+    (void)num;
+    if (p) {
+      __libc_free((void *)p);
+    }
+  }
+};
+
+// return that all specializations of this allocator are interchangeable
+template <class T1, class T2>
+bool operator==(const ContainerAllocator<T1> &,
+                const ContainerAllocator<T2> &) throw() {
+  return true;
+}
+template <class T1, class T2>
+bool operator!=(const ContainerAllocator<T1> &,
+                const ContainerAllocator<T2> &) throw() {
+  return false;
+}

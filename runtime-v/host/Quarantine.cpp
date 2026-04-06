@@ -1,13 +1,13 @@
 /// Quarantine.cpp — 堆释放隔离缓存实现
 
 #include "Quarantine.h"
-#include "Malloc.h"
+#include "SGXSanRTApp.h"
 #include <algorithm>
 #include <boost/stacktrace.hpp>
 
 QuarantineCache::QuarantineCache() {
-  m_queue = new QuarantineQueue();
-  update_heap_usage(m_queue);
+  void *p = __libc_malloc(sizeof(QuarantineQueue));
+  m_queue = new (p) QuarantineQueue();
   m_mutex = PTHREAD_MUTEX_INITIALIZER;
   m_used_size = 0;
   // 根据系统数据段资源限制动态确定隔离缓存上限
@@ -25,8 +25,8 @@ QuarantineCache::~QuarantineCache() {
   // 先逐一释放队列中所有隔离块的实际内存
   while (not empty())
     freeOldestQuarantineElement();
-  update_heap_usage(m_queue, false);
-  delete m_queue;
+  m_queue->~QuarantineQueue();
+  __libc_free(m_queue);
   m_queue = nullptr;
   m_used_size = 0;
   m_max_size = 0;
@@ -97,11 +97,17 @@ void QuarantineCache::put(QuarantineElement qe) {
 
 /// 释放隔离条目：还原影子内存 → 删除调用栈记录 → 调用 free()
 void QuarantineCache::freeQuarantineElement(QuarantineElement qe) {
-  update_heap_usage((void *)qe.alloc_beg, false);
   auto *m_qe = (chunk *)(qe.user_beg - sizeof(chunk));
-  delete m_qe->bt;
-  m_qe->bt = nullptr;
-  free(reinterpret_cast<void *>(qe.alloc_beg));
+  sgxsan_assert((uptr)m_qe >= 0x1000);                 // m 地址合法
+  sgxsan_assert(m_qe->magic == kHeapObjectChunkMagic); // m 魔数合法
+  sgxsan_error((uptr)m_qe->bt < 0x1000 && m_qe->bt != nullptr,
+               "m_qe=%p m_qe->bt=%p\n", m_qe, m_qe->bt); // bt 指针合法
+  if (m_qe->bt) {
+    m_qe->bt->~MallocFreeBT();
+    __libc_free(m_qe->bt);
+    m_qe->bt = nullptr;
+  }
+  __libc_free(reinterpret_cast<void *>(qe.alloc_beg));
   log_trace("[Free QuarantineElement] [0x%lx..0x%lx ~ 0x%lx..0x%lx) \n",
             qe.alloc_beg, qe.user_beg, qe.user_beg + qe.user_size,
             qe.alloc_beg + qe.alloc_size);
@@ -113,16 +119,21 @@ void QuarantineCache::freeQuarantineElement(QuarantineElement qe) {
 
 /// 直接释放（不经过隔离队列，用于超大块或队列不可用时）
 void QuarantineCache::freeDirectly(QuarantineElement qe) {
-  update_heap_usage((void *)qe.alloc_beg, false);
   auto *m_qe = (chunk *)(qe.user_beg - sizeof(chunk));
-  delete m_qe->bt;
-  m_qe->bt = nullptr;
-  free((void *)qe.alloc_beg);
+  sgxsan_assert((uptr)m_qe >= 0x1000);
+  sgxsan_assert(m_qe->magic == kHeapObjectChunkMagic);
+  sgxsan_error((uptr)m_qe->bt < 0x1000 && m_qe->bt != nullptr,
+               "m_qe=%p m_qe->bt=%p\n", m_qe, m_qe->bt);
+  if (m_qe->bt) {
+    m_qe->bt->~MallocFreeBT();
+    __libc_free(m_qe->bt);
+    m_qe->bt = nullptr;
+  }
+  __libc_free((void *)qe.alloc_beg);
   log_trace("[Direct Free] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", qe.alloc_beg,
             qe.user_beg, qe.user_beg + qe.user_size,
             qe.alloc_beg + qe.alloc_size);
-  FastPoisonShadow(qe.user_beg, RoundUpTo(qe.user_size, SHADOW_GRANULARITY),
-                   kAsanNotPoisonedMagic, true);
+  PoisonShadow(qe.alloc_beg, qe.alloc_size, kAsanNotPoisonedMagic, true);
 }
 
 /// 淘汰并释放队首最旧的隔离条目

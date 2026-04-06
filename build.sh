@@ -5,6 +5,7 @@ PROJ_DIR=$(realpath $(dirname $0))
 IS_DEBUG=0
 PREPARE_SDK=0
 BUILD_SDK=0
+BUILD_RUNTIME="both"  # normal | virtual | both
 JOBS=$(nproc)
 MY_FLAGS=""
 
@@ -12,14 +13,15 @@ show_help() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  -h|--help           Show this help message"
-    echo "  -g                  Build in debug mode"
-    echo "  --prepare-sdk       Prepare SGX SDK (only once needed)"
-    echo "  --build-sdk         Build SGX SDK"
+    echo "  -h|--help              Show this help message"
+    echo "  -g                     Build in debug mode"
+    echo "  --prepare-sdk          Prepare SGX SDK (only once needed)"
+    echo "  --build-sdk            Build SGX SDK"
+    echo "  --runtime <mode>       Build runtime: normal | virtual | both (default: both)"
     exit 0
 }
 
-OPTS=$(getopt -o hg -l help,prepare-sdk,build-sdk -n 'parse-options' -- "$@")
+OPTS=$(getopt -o hg -l help,prepare-sdk,build-sdk,runtime: -n 'parse-options' -- "$@")
 eval set -- "$OPTS"
 while true; do
     case "$1" in
@@ -40,6 +42,14 @@ while true; do
             BUILD_SDK=1
             shift
             ;;
+        --runtime)
+            BUILD_RUNTIME="$2"
+            if [[ "$BUILD_RUNTIME" != "normal" && "$BUILD_RUNTIME" != "virtual" && "$BUILD_RUNTIME" != "both" ]]; then
+                echo "Error: --runtime must be normal | virtual | both"
+                exit 1
+            fi
+            shift 2
+            ;;
         --)
             shift
             break
@@ -52,21 +62,29 @@ done
 
 ########## Prepare SGX SDK ##########
 if [ ${PREPARE_SDK} -eq 1 ]; then
-    pushd ${PROJ_DIR}/third_party/linux-sgx
-        make preparation
-    popd
-    pushd ${PROJ_DIR}/third_party/linux-sgx-v
-        make preparation
-    popd
+    if [[ "$BUILD_RUNTIME" == "normal" || "$BUILD_RUNTIME" == "both" ]]; then
+        pushd ${PROJ_DIR}/third_party/linux-sgx
+            make preparation
+        popd
+    fi
+    if [[ "$BUILD_RUNTIME" == "virtual" || "$BUILD_RUNTIME" == "both" ]]; then
+        pushd ${PROJ_DIR}/third_party/linux-sgx-v
+            make preparation
+        popd
+    fi
 fi
 
 ########## Build sgx_edger8r ##########
-pushd ${PROJ_DIR}/third_party/linux-sgx/sdk/edger8r
-    dune build
-popd
-pushd ${PROJ_DIR}/third_party/linux-sgx-v/sdk/edger8r
-    dune build
-popd
+if [[ "$BUILD_RUNTIME" == "normal" || "$BUILD_RUNTIME" == "both" ]]; then
+    pushd ${PROJ_DIR}/third_party/linux-sgx/sdk/edger8r
+        dune build
+    popd
+fi
+if [[ "$BUILD_RUNTIME" == "virtual" || "$BUILD_RUNTIME" == "both" ]]; then
+    pushd ${PROJ_DIR}/third_party/linux-sgx-v/sdk/edger8r
+        dune build
+    popd
+fi
 
 ########## Build EnclaveFuzz and Sticker ##########
 if [ ${IS_DEBUG} -eq 1 ]; then
@@ -76,8 +94,12 @@ else
 fi
 cmake -B ${PROJ_DIR}/build/enclave_fuzz ${CMAKE_FLAGS}
 cmake --build ${PROJ_DIR}/build/enclave_fuzz -j$(nproc)
-cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan --prefix ${PROJ_DIR}/install/enclave_fuzz_n
-cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan_v --prefix ${PROJ_DIR}/install/enclave_fuzz_v
+if [[ "$BUILD_RUNTIME" == "normal" || "$BUILD_RUNTIME" == "both" ]]; then
+    cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan --prefix ${PROJ_DIR}/install/enclave_fuzz_n
+fi
+if [[ "$BUILD_RUNTIME" == "virtual" || "$BUILD_RUNTIME" == "both" ]]; then
+    cmake --install ${PROJ_DIR}/build/enclave_fuzz --component sgxsan_v --prefix ${PROJ_DIR}/install/enclave_fuzz_v
+fi
 
 ########## Build SGX SDK ##########
 build_sdk() {
@@ -262,6 +284,10 @@ build_sdk() {
 }
 
 if [ ${BUILD_SDK} -eq 1 ]; then
-    build_sdk "${PROJ_DIR}/third_party/linux-sgx" "${PROJ_DIR}/install/enclave_fuzz_n" 0 "" "gcc" "g++" "${MY_FLAGS}"
-    build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table" "${PROJ_DIR}/install/llvm-project/bin/clang" "${PROJ_DIR}/install/llvm-project/bin/clang++" "${MY_FLAGS} -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes"
+    if [[ "$BUILD_RUNTIME" == "normal" || "$BUILD_RUNTIME" == "both" ]]; then
+        build_sdk "${PROJ_DIR}/third_party/linux-sgx" "${PROJ_DIR}/install/enclave_fuzz_n" 0 "" "gcc" "g++" "${MY_FLAGS}"
+    fi
+    if [[ "$BUILD_RUNTIME" == "virtual" || "$BUILD_RUNTIME" == "both" ]]; then
+        build_sdk "${PROJ_DIR}/third_party/linux-sgx-v" "${PROJ_DIR}/install/enclave_fuzz_v" 1 "-fsanitize=address -mllvm -asan-enclave-v -mllvm -asan-use-after-return=never -mllvm -asan-opt-globals=false -fsanitize-coverage=inline-8bit-counters,pc-table" "${PROJ_DIR}/install/llvm-project/bin/clang" "${PROJ_DIR}/install/llvm-project/bin/clang++" "${MY_FLAGS} -Wno-implicit-exception-spec-mismatch -Wno-unknown-warning-option -Wno-unknown-attributes"
+    fi
 fi

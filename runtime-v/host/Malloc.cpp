@@ -10,10 +10,13 @@
 #include "Malloc.h"
 #include "ErrorReport.h"
 #include "Poison.h"
+#include "Quarantine.h"
 #include "SGXSanRTApp.h"
 #include <algorithm>
 #include <boost/stacktrace.hpp>
 #include <string.h>
+
+size_t (*__libc_malloc_usable_size)(void *mem) noexcept;
 
 /// 全局隔离缓存（Never free，退出时仍在使用）
 QuarantineCache *gQCache = nullptr;
@@ -26,48 +29,23 @@ void InitHeapAllocator() {
   // SGXSan 构造函数执行前只有主线程，无需考虑多线程
   if (initialized)
     return;
-  gQCache = new QuarantineCache();
+  // 用 dladdr 找到 __libc_malloc 所在的 libc 路径，确保找的是同一个 libc
+  Dl_info libc_info;
+  sgxsan_assert(dladdr((void *)__libc_malloc, &libc_info) != 0);
+  void *libc_handle = dlopen(libc_info.dli_fname, RTLD_NOLOAD | RTLD_NOW);
+  sgxsan_assert(libc_handle != nullptr);
+  __libc_malloc_usable_size =
+      reinterpret_cast<decltype(__libc_malloc_usable_size)>(
+          dlsym(libc_handle, "malloc_usable_size"));
+  sgxsan_assert(__libc_malloc_usable_size != nullptr);
+  dlclose(libc_handle);
+  void *p = __libc_malloc(sizeof(QuarantineCache));
+  gQCache = new (p) QuarantineCache();
   initialized = true;
 }
 
-// ── 堆使用量统计（仅在 DEBUG 日志级别下启用）────────────────────────────
-
-static pthread_mutex_t heap_usage_mutex = PTHREAD_MUTEX_INITIALIZER;
-size_t global_heap_usage = 0;
-
-/// chunk 魔数：用于校验 user_beg - sizeof(chunk) 处确实是 chunk 元数据，
-/// 而非 SGXSanInit 前通过原始 malloc 分配的指针
-const size_t kHeapObjectChunkMagic = 0xDEADBEEF;
-
 /// chunk：嵌入左红区末尾的元数据，记录本次分配的原始信息
 // （定义在 Malloc.h 以便 Quarantine.cpp / ErrorReport.cpp 直接访问 bt）
-
-void update_heap_usage(void *ptr, bool is_alloc) {
-#if (USED_LOG_LEVEL >= 3 /* LOG_LEVEL_DEBUG */)
-  static uint64_t heapLogIndex = 0;
-  if (ptr) {
-    pthread_mutex_lock(&heap_usage_mutex);
-    heapLogIndex++;
-    size_t allocated_size = malloc_usable_size(ptr);
-    if (is_alloc) {
-      log_trace("(%ld)[HEAP SIZE] 0x%lx=0x%lx+0x%lx\n", heapLogIndex,
-                global_heap_usage + allocated_size, global_heap_usage,
-                allocated_size);
-      global_heap_usage += allocated_size;
-    } else {
-      log_trace("(%ld)[HEAP SIZE] 0x%lx=0x%lx-0x%lx\n", heapLogIndex,
-                global_heap_usage - allocated_size, global_heap_usage,
-                allocated_size);
-      global_heap_usage -= allocated_size;
-    }
-    pthread_mutex_unlock(&heap_usage_mutex);
-  }
-#else
-  (void)ptr;
-  (void)is_alloc;
-  (void)heap_usage_mutex;
-#endif
-}
 
 // ── 分配实现 ──────────────────────────────────────────────────────────────
 
@@ -75,8 +53,7 @@ void update_heap_usage(void *ptr, bool is_alloc) {
 /// 若未完成 SGXSan 初始化则降级为原始 malloc
 void *sgxsan_malloc_raw(size_t size, uptr alignment) {
   if (not asan_inited) {
-    auto p = malloc(size);
-    update_heap_usage(p);
+    auto p = __libc_malloc(size);
     return p;
   }
 
@@ -86,13 +63,12 @@ void *sgxsan_malloc_raw(size_t size, uptr alignment) {
   uptr rounded_size = RoundUpTo(size, alignment);
   uptr needed_size = rounded_size + 2 * rz_size;
 
-  void *allocated = malloc(needed_size);
+  void *allocated = __libc_malloc(needed_size);
   if (allocated == nullptr) {
     return nullptr;
   }
-  update_heap_usage(allocated);
 
-  size_t allocated_size = malloc_usable_size(allocated);
+  size_t allocated_size = __libc_malloc_usable_size(allocated);
 
   uptr alloc_beg = (uptr)allocated;
   uptr alloc_end = alloc_beg + allocated_size;
@@ -113,7 +89,8 @@ void *sgxsan_malloc_raw(size_t size, uptr alignment) {
   m->alloc_size = allocated_size;
   m->user_size = size;
   if (DFEnableCollectStack) {
-    m->bt = new MallocFreeBT();
+    void *p = __libc_malloc(sizeof(MallocFreeBT));
+    m->bt = new (p) MallocFreeBT();
     m->bt->malloc_bt_cnt = boost::stacktrace::safe_dump_to(
         m->bt->malloc_bt, sizeof(m->bt->malloc_bt));
     m->bt->free_bt_cnt = 0;
@@ -135,7 +112,7 @@ void *sgxsan_malloc_raw(size_t size, uptr alignment) {
   return (void *)user_beg;
 }
 
-void *sgxsan_malloc(size_t size) {
+void *malloc(size_t size) noexcept {
   return sgxsan_malloc_raw(size, SHADOW_GRANULARITY);
 }
 
@@ -147,9 +124,17 @@ void sgxsan_free_raw(void *ptr, uptr alignment, uptr expected_size) {
   if (ptr == nullptr)
     return;
 
+  // 检查近空指针（NULL + small offset），通常说明对空结构体访问了某字段
+  // 常见于 GMP 分配器在 simulation 环境返回非法指针的情况
+  if ((uptr)ptr < 0x1000) {
+    GET_CALLER_PC_BP_SP;
+    ReportGenericError(pc, bp, sp, (uptr)ptr, false, 0,
+                       "Near-null pointer passed to free");
+    return;
+  }
+
   if (not asan_inited) {
-    update_heap_usage(ptr, false);
-    free(ptr);
+    __libc_free(ptr);
     return;
   }
 
@@ -157,8 +142,7 @@ void sgxsan_free_raw(void *ptr, uptr alignment, uptr expected_size) {
   chunk *m = (chunk *)(user_beg - sizeof(chunk));
   if (m->magic != kHeapObjectChunkMagic) {
     // SGXSanInit 前分配的内存无 chunk 元数据，降级为原始 free
-    update_heap_usage(ptr, false);
-    free(ptr);
+    __libc_free(ptr);
     return;
   }
   sgxsan_assert(expected_size == 0 || expected_size == m->user_size);
@@ -174,26 +158,38 @@ void sgxsan_free_raw(void *ptr, uptr alignment, uptr expected_size) {
   log_trace("\n");
   log_trace("[Recycle] [0x%lx..0x%lx ~ 0x%lx..0x%lx)\n", m->alloc_beg, user_beg,
             user_beg + m->user_size, m->alloc_beg + m->alloc_size);
-  // 将用户区影子标记为已释放，后续访问触发 use-after-free 报告
-  PoisonShadow(user_beg, RoundUpTo(m->user_size, alignment),
-               kAsanHeapFreeMagic);
-
-  QuarantineElement qe;
-  qe.alloc_beg = m->alloc_beg;
-  qe.alloc_size = m->alloc_size;
-  qe.user_beg = user_beg;
-  qe.user_size = m->user_size;
-
-  gQCache->put(qe);
+  static __thread bool in_quarantine = false;
+  if (!in_quarantine) {
+    in_quarantine = true;
+    // 将用户区影子标记为已释放，后续访问触发 use-after-free 报告
+    PoisonShadow(user_beg, RoundUpTo(m->user_size, alignment),
+                 kAsanHeapFreeMagic);
+    QuarantineElement qe;
+    qe.alloc_beg = m->alloc_beg;
+    qe.alloc_size = m->alloc_size;
+    qe.user_beg = user_beg;
+    qe.user_size = m->user_size;
+    gQCache->put(qe);
+    in_quarantine = false;
+  } else {
+    // 信号重入：直接释放，解毒避免后续误报
+    if (m->bt) {
+      m->bt->~MallocFreeBT();
+      __libc_free(m->bt);
+      m->bt = nullptr;
+    }
+    __libc_free((void *)m->alloc_beg);
+    PoisonShadow(m->alloc_beg, m->alloc_size, kAsanNotPoisonedMagic, true);
+  }
 }
 
-void sgxsan_free(void *ptr) { sgxsan_free_raw(ptr, SHADOW_GRANULARITY, 0); }
+void free(void *ptr) noexcept { sgxsan_free_raw(ptr, SHADOW_GRANULARITY, 0); }
 
 // ── calloc / realloc / malloc_usable_size ────────────────────────────────
 
-void *sgxsan_calloc(size_t n_elements, size_t elem_size) {
+void *calloc(size_t n_elements, size_t elem_size) noexcept {
   if (not asan_inited) {
-    return calloc(n_elements, elem_size);
+    return __libc_calloc(n_elements, elem_size);
   }
   size_t total_size = n_elements * elem_size;
   if (total_size / n_elements != elem_size) {
@@ -201,38 +197,37 @@ void *sgxsan_calloc(size_t n_elements, size_t elem_size) {
     sgxsan_warning(true, "Multiple Overflow in calloc\n");
     return nullptr;
   }
-  void *mem = sgxsan_malloc(total_size);
+  void *mem = malloc(total_size);
   if (mem != nullptr) {
     memset(mem, 0, total_size);
   }
   return mem;
 }
 
-void *sgxsan_realloc(void *oldmem, size_t bytes) {
+void *realloc(void *oldmem, size_t bytes) noexcept {
   if (not asan_inited) {
-    return realloc(oldmem, bytes);
+    return __libc_realloc(oldmem, bytes);
   }
   if (oldmem == nullptr) {
-    return sgxsan_malloc(bytes);
+    return malloc(bytes);
   }
   chunk *m = (chunk *)((uptr)oldmem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);
   if (bytes == 0) {
-    sgxsan_free(oldmem);
+    free(oldmem);
     return nullptr;
   }
-  void *mem = sgxsan_malloc(bytes);
+  void *mem = malloc(bytes);
   if (mem != nullptr) {
     memcpy(mem, oldmem, std::min(m->user_size, bytes));
-    sgxsan_free(oldmem);
+    free(oldmem);
   }
   return mem;
 }
 
-size_t sgxsan_malloc_usable_size(void *mem) {
-  if (not asan_inited) {
-    return malloc_usable_size(mem);
-  }
+size_t malloc_usable_size(void *mem) noexcept {
+  sgxsan_error(not asan_inited,
+               "malloc_usable_size should not be called before SGXSanInit\n");
   chunk *m = (chunk *)((uptr)mem - sizeof(chunk));
   sgxsan_assert(m->magic == kHeapObjectChunkMagic);
   return m->user_size;
