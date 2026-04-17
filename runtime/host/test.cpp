@@ -48,7 +48,6 @@ uint8_t *g_arena_alloc(size_t size) {
 
 extern "C" {
 
-void customized_init();
 void customized_harness();
 void sancov_copy_init();
 __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
@@ -66,7 +65,6 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
   }
   mprotect(g_arena + G_ARENA_CAP, 4096,
            PROT_NONE); // guard page: catch OOB past arena end
-  customized_init();
   return 0;
 }
 

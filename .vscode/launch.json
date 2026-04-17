@@ -78,7 +78,7 @@
             "name": "sgxwallet",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/sgx_apps/sgxwallet/sgxwallet",
+            "program": "${workspaceFolder}/sgx_apps/sgxwallet/poc_bls_sign_oracle",
             "args": [
                 "-V",
                 "-y",
@@ -159,24 +159,25 @@
             "name": "TestApp",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/workdir/sgxwallet/TestApp",
+            "program": "${workspaceFolder}/workdir/wasm-micro-runtime/TestApp",
             "args": [
                 "./result/seeds",
                 "-artifact_prefix=./result/crashes/",
                 // "./result/seeds/001e6151b42a01614d5b13ce4f4541a53d9c312e",
-                "-rss_limit_mb=10240",
-                "-max_len=65536",
+                "-report_slow_units=60",
+                // "-rss_limit_mb=10240",
+                // "-max_len=65536",
                 // "-print_coverage=1",
                 // "-runs=0"
                 // "-fork=1",
                 // "-ignore_crashes=1",
             ],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/workdir/sgxwallet",
+            "cwd": "${workspaceFolder}/workdir/wasm-micro-runtime",
             "environment": [
                 {
                     "name": "LD_LIBRARY_PATH",
-                    "value": "/home/leone/EnclaveFuzz/install/enclave_fuzz_v/lib64"
+                    "value": "/home/leone/EnclaveFuzz/install/enclave_fuzz_n/lib64"
                 }
             ],
             "externalConsole": false,

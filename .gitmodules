@@ -13,9 +13,6 @@
 [submodule "sgx_apps/wasm-micro-runtime"]
 	path = sgx_apps/wasm-micro-runtime
 	url = git@github.com:LeoneChen/wasm-micro-runtime.git
-[submodule "EnclavePatch-Data"]
-	path = EnclavePatch-Data
-	url = git@github.com:LeoneChen/EnclavePatch-Data.git
 [submodule "sgx_apps/sgxwallet"]
 	path = sgx_apps/sgxwallet
 	url = git@github.com:LeoneChen/sgxwallet.git
@@ -28,3 +25,6 @@
 [submodule "third_party/linux-sgx-v"]
 	path = third_party/linux-sgx-v
 	url = git@github.com:LeoneChen/linux-sgx.git
+[submodule "EnclavePatch-paper"]
+	path = EnclavePatch-paper
+	url = git@github.com:LeoneChen/EnclavePatch-paper.git

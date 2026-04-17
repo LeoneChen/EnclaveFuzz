@@ -115,12 +115,12 @@ if [ ${BUILD} -eq 1 ]; then
                 fi
                 pushd product-mini/platforms/linux-sgx
                     rm -rf build
-                    CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" cmake -B build -DENCLAVE_FUZZ=1 ${DEBUG_CMAKE_FLAGS} -DWAMR_BUILD_SIMD=0
+                    CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz_n" cmake -B build -DENCLAVE_FUZZ=1 ${DEBUG_CMAKE_FLAGS} -DWAMR_BUILD_SIMD=0
                     cmake --build build -j${JOBS}
 
                     pushd enclave-sample
                         make clean
-                        make SGX_MODE=HW CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz" SGX_SSL="${PROJ_DIR}/install/enclave_fuzz/sgxssl" ENCLAVE_FUZZ=1 ${DEBUG_MAKE_FLAGS} -j${JOBS}
+                        make SGX_MODE=HW CC="${MY_CC}" CXX="${MY_CXX}" SGX_SDK="${PROJ_DIR}/install/enclave_fuzz_n" SGX_SSL="${PROJ_DIR}/install/enclave_fuzz/sgxssl" ENCLAVE_FUZZ=1 ${DEBUG_MAKE_FLAGS} -j${JOBS}
                     popd
                 popd
             popd
@@ -155,7 +155,7 @@ if [ ${BUILD} -eq 1 ]; then
         "sgxwallet")
             pushd ${TARGET_DIR}
                 # pushd scripts
-                #     ./build_deps.py
+                #     ./build_deps.sh
                 # popd
                 if [ -f Makefile ]; then
                     make clean
@@ -164,11 +164,7 @@ if [ ${BUILD} -eq 1 ]; then
                 if [ ${AS_FUZZ} -eq 1 ]; then
                     ./configure --with-sgxsdk=${PROJ_DIR}/install/enclave_fuzz_v CFLAGS=" -Og -g" CXXFLAGS=" -Og -g" CC="${MY_CC}" CXX="${MY_CXX}" --enable-enclave-fuzz --enable-sgx-simulation
                 else
-                    if [ ${DEBUG} -eq 1 ]; then
-                        ./configure CFLAGS=" -O0 -g" CXXFLAGS=" -O0 -g"
-                    else
-                        ./configure --with-sgx-build=prerelease
-                    fi
+                    ./configure CFLAGS=" -Og -g" CXXFLAGS=" -Og -g" # --with-sgx-build=prerelease
                 fi
                 make -j${JOBS}
             popd

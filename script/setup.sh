@@ -50,6 +50,6 @@ echo "[+] APP_PATH: ${APP_PATH}"
 echo "[+] ENCLAVE_PATH: ${ENCLAVE_PATH}"
 echo "[+] WORKDIR: ${WORKDIR}"
 
-mkdir -p ${WORKDIR}/result/{seeds,crashes,fixed}
+mkdir -p ${WORKDIR}/result/{seeds,crashes,fixed} ${WORKDIR}/log
 cp ${APP_PATH} ${WORKDIR}/TestApp
 cp ${ENCLAVE_PATH} ${WORKDIR}/TestEnclave

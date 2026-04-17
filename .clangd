@@ -23,5 +23,8 @@ CompileFlags:
         # -I/home/leone/EnclaveFuzz/sgx_apps/wasm-micro-runtime/product-mini/platforms/linux-sgx/enclave-sample/App,
         # sgxwallet
         # -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/sgx-gmp,
-        # -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/third_party/SCIPR/,
+        -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/third_party/SCIPR/,
+        -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/libBLS/bls,
+        -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/libBLS/,
+        -I/home/leone/EnclaveFuzz/sgx_apps/sgxwallet/tgmp-build/include,
     ]
