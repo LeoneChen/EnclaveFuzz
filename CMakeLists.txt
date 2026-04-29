@@ -20,6 +20,13 @@ install(TARGETS
         ARCHIVE DESTINATION lib64
         COMPONENT sgxsan)
 
+# Framework header used by per-app harness.cpp (HARNESS_REGISTER macro,
+# registry type/extern declarations). Installed to both sgxsan and
+# sgxsan_v include dirs so apps using either runtime can include it.
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/harness/harness_framework.h
+        DESTINATION include
+        COMPONENT sgxsan)
+
 install(DIRECTORY
     ${SGXSDK_DIR}/common/inc/
     DESTINATION include
@@ -80,6 +87,10 @@ install(TARGETS
         sgxsan_enclave_v
         LIBRARY DESTINATION lib64
         ARCHIVE DESTINATION lib64
+        COMPONENT sgxsan_v)
+
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/harness/harness_framework.h
+        DESTINATION include
         COMPONENT sgxsan_v)
 
 install(DIRECTORY

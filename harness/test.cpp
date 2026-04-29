@@ -1,23 +1,18 @@
-#include "FuzzedDataProvider.h"
+// Framework code uses the real glibc allocator; suppress the arena redirection
+// that harness_framework.h would otherwise apply for app-side harness code.
+// (harness_framework.h transitively pulls in FuzzedDataProvider.h and sgx_urts.h.)
+#define HARNESS_FRAMEWORK_NO_ARENA_REDIRECT
+#include "harness_framework.h"
+
 #include "sgx_error.h"
-#include "sgx_urts.h"
 #include <assert.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 #include <cstdarg>
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <ctime>
 #include <getopt.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 
@@ -46,11 +41,41 @@ uint8_t *g_arena_alloc(size_t size) {
   return p;
 }
 
+// Harness registry storage (declared in harness_framework.h).
+// BSS zero-initialization happens at program load, before any
+// HARNESS_REGISTER static initializer runs, so this is safe regardless
+// of cross-translation-unit init order.
+struct TestHarnessEntry test_harness_registry[10240];
+unsigned int test_harness_count = 0;
+int total_weight = 0;
+
 extern "C" {
 
-void customized_harness();
 void sancov_copy_init();
 __attribute__((weak)) int SGXFuzzerEnvClearBeforeTest();
+
+// Framework-owned: weighted random selection of a registered harness.
+// Apps register via HARNESS_REGISTER macro; do not redefine this function.
+void customized_harness(void) {
+  if (test_harness_count == 0) {
+    fprintf(stderr, "[!] No harnesses registered\n");
+    abort();
+  }
+  if (total_weight == 0) {
+    fprintf(stderr, "[!] All harness weights are 0\n");
+    abort();
+  }
+  if (g_fdp->remaining_bytes() < 1) return;
+  int rand_val = g_fdp->ConsumeIntegralInRange<int>(0, total_weight - 1);
+  int cumulative = 0;
+  for (unsigned int i = 0; i < test_harness_count; i++) {
+    cumulative += test_harness_registry[i].weight;
+    if (rand_val < cumulative) {
+      test_harness_registry[i].function();
+      break;
+    }
+  }
+}
 
 // libFuzzer Callbacks
 int LLVMFuzzerInitialize(int *argc, char ***argv) {

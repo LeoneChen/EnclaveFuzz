@@ -89,7 +89,7 @@
             "environment": [],
             "externalConsole": false,
             // "MIMode": "gdb",
-            "miDebuggerPath": "${workspaceFolder}/gdb/sgx-gdb",
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
@@ -112,7 +112,7 @@
                 "corpus/",
                 "-max_len=4096"
             ],
-            "miDebuggerPath": "/home/leone/EnclaveFuzz/gdb/sgx-gdb",
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
             "cwd": "${workspaceFolder}/sgx_apps/mobilecoin",
             "environment": [
                 {
@@ -141,7 +141,7 @@
             "type": "cppdbg",
             "request": "attach",
             "program": "${workspaceFolder}/workdir/sgxwallet/TestApp",
-            "miDebuggerPath": "${workspaceFolder}/gdb/sgx-gdb",
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
@@ -159,21 +159,21 @@
             "name": "TestApp",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/workdir/wasm-micro-runtime/TestApp",
+            "program": "${workspaceFolder}/workdir/sgxwallet/TestApp",
             "args": [
                 "./result/seeds",
                 "-artifact_prefix=./result/crashes/",
                 // "./result/seeds/001e6151b42a01614d5b13ce4f4541a53d9c312e",
                 "-report_slow_units=60",
-                // "-rss_limit_mb=10240",
-                // "-max_len=65536",
+                "-rss_limit_mb=10240",
+                "-max_len=65536",
                 // "-print_coverage=1",
                 // "-runs=0"
                 // "-fork=1",
                 // "-ignore_crashes=1",
             ],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/workdir/wasm-micro-runtime",
+            "cwd": "${workspaceFolder}/workdir/sgxwallet",
             "environment": [
                 {
                     "name": "LD_LIBRARY_PATH",
@@ -181,7 +181,7 @@
                 }
             ],
             "externalConsole": false,
-            "miDebuggerPath": "${workspaceFolder}/gdb/sgx-gdb",
+            "miDebuggerPath": "/opt/intel/sgxsdk/bin/sgx-gdb",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",

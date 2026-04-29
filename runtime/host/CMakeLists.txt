@@ -3,7 +3,7 @@ include_directories(
     ${SGXSDK_DIR}/common/inc
     ${LLVM_INSTALL_PREFIX}/lib/clang/13.0.1/include/fuzzer)
 
-add_library(sgxsan_host STATIC SGXSanRTApp.cpp test.cpp)
+add_library(sgxsan_host STATIC SGXSanRTApp.cpp ${CMAKE_SOURCE_DIR}/harness/test.cpp)
 
 set_target_properties(
     sgxsan_host PROPERTIES

@@ -26,7 +26,7 @@ add_library(
     Sticker.cpp
     ${SGXSDK_V_DIR}/common/src/se_event.c
     ${SGXSDK_V_DIR}/psw/urts/enclave_mutex.cpp
-    test.cpp
+    ${CMAKE_SOURCE_DIR}/harness/test.cpp
 )
 
 set_target_properties(sgxsan_host_v PROPERTIES POSITION_INDEPENDENT_CODE True OUTPUT_NAME "sgxsan_host")
