@@ -25,6 +25,3 @@
 [submodule "third_party/linux-sgx-v"]
 	path = third_party/linux-sgx-v
 	url = git@github.com:LeoneChen/linux-sgx.git
-[submodule "EnclavePatch-paper"]
-	path = EnclavePatch-paper
-	url = git@github.com:LeoneChen/EnclavePatch-paper.git
